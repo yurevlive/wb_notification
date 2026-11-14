@@ -1,2 +1,5 @@
 [tool.flet.android]
 uses_cleartext_traffic = true
+
+[tool.flet.android.permission]
+"android.permission.INTERNET" = true
