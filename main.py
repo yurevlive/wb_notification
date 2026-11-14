@@ -1,7 +1,8 @@
 import flet as ft
 import requests
 
-API_URL = "http://127.0.0"
+HOST = "127.0.0." + "1:8000"
+API_URL = f"http://{HOST}/tasks"
 
 def main(page: ft.Page):
     page.title = "WB Снайпер"
