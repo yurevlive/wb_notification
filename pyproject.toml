@@ -1,0 +1,2 @@
+[tool.flet.android]
+uses_cleartext_traffic = true
