@@ -45,8 +45,8 @@ def main(page: ft.Page):
                         )
                     )
                 )
-        except Exception:
-            status_text.value = "⚠️ Нет связи с сервером! Проверьте, запущен ли Termux."
+        except Exception as err:
+            status_text.value = f"⚠️ Ошибка: {err}"
             status_text.color = "red"
         page.update()
 
@@ -67,8 +67,8 @@ def main(page: ft.Page):
             price_input.value = ""
             limit_input.value = "1"
             load_list()
-        except Exception:
-            status_text.value = "Ошибка добавления. Проверьте Termux."
+        except Exception as err:
+            status_text.value = f"⚠️ Ошибка добавления: {err}"
             status_text.color = "red"
             page.update()
 
