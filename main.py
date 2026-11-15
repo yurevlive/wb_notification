@@ -53,7 +53,7 @@ def main(page: ft.Page):
             a_err.value, a_err.color = "⚠️ Введите логин и пароль", "#FFB74D"
             page.update()
             return
-        a_err.value, a_err.color = "⏳ Подключаюсь к серверу...", "#E040FB"
+        a_err.value = ""
         page.update()
         ep = "register" if st["reg"] else "login"
         try:
