@@ -1,4 +1,3 @@
-import threading
 import flet as ft
 import requests
 
@@ -11,7 +10,7 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor, page.padding = BG, 0
 
-    st_lbl = ft.Text("Проверка обновлений...", size=13, color="#E040FB", text_align=ft.TextAlign.CENTER)
+    st_lbl = ft.Text("Загрузка интерфейса...", size=13, color="#E040FB", text_align=ft.TextAlign.CENTER)
     splash = ft.Container(
         height=620, bgcolor=BG, alignment=ft.alignment.center, padding=20,
         content=ft.Column([
@@ -23,22 +22,20 @@ def main(page: ft.Page):
         ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
     )
     page.add(splash)
+    page.update()
 
-    def boot():
-        try:
-            r = requests.get(API + S + "get_ui", timeout=10)
-            if r.status_code != 200:
-                st_lbl.value, st_lbl.color = f"Ошибка сервера: {r.status_code}", "#FF5252"
-                page.update()
-                return
-            ns = {}
-            exec(r.text, ns)
-            ns["run_app"](page)
-        except Exception as ex:
-            st_lbl.value = f"Ошибка: {ex}"
-            st_lbl.color = "#FF5252"
+    try:
+        r = requests.get(API + S + "get_ui", timeout=10)
+        if r.status_code != 200:
+            st_lbl.value, st_lbl.color = f"Ошибка сервера: {r.status_code}", "#FF5252"
             page.update()
-
-    threading.Timer(0.8, boot).start()
+            return
+        ns = {}
+        exec(r.text, ns)
+        ns["run_app"](page)
+    except Exception as ex:
+        st_lbl.value = f"Ошибка: {ex}"
+        st_lbl.color = "#FF5252"
+        page.update()
 
 ft.app(target=main)
