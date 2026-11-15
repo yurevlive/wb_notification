@@ -17,6 +17,9 @@ def main(page: ft.Page):
     page.padding = 0
     page.scroll = "adaptive"
 
+    current_filter = {"mode": "all"}
+    cached_tasks = []
+
     # ==========================================
     # ЗАСТАВКА ПРИ ЗАПУСКЕ
     # ==========================================
@@ -56,7 +59,7 @@ def main(page: ft.Page):
     )
 
     # ==========================================
-    # ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ
+    # ШАПКА ПРИЛОЖЕНИЯ
     # ==========================================
     badge_dot = ft.Icon(ft.Icons.CIRCLE, size=10, color="#00E676")
     badge_label = ft.Text("Онлайн", size=12, color="white", weight="w500")
@@ -91,6 +94,9 @@ def main(page: ft.Page):
         ])
     )
 
+    # ==========================================
+    # ФОРМА ДОБАВЛЕНИЯ ТОВАРА
+    # ==========================================
     sku_input = ft.TextField(
         hint_text="Артикул товара WB (например, 596432419)",
         prefix_icon=ft.Icons.QR_CODE_2_ROUNDED,
@@ -132,7 +138,54 @@ def main(page: ft.Page):
 
     status_text = ft.Text("", size=13, weight="w500")
     tasks_column = ft.Column(spacing=12)
-    tasks_counter = ft.Text("Активные задачи (0)", size=17, weight="bold", color="white")
+
+    # ==========================================
+    # ВКЛАДКИ ФИЛЬТРАЦИИ
+    # ==========================================
+    tab_all_text = ft.Text("Все (0)", size=13, weight="bold", color="white")
+    tab_active_text = ft.Text("Активные (0)", size=13, weight="w500", color="#A0A0B0")
+    tab_done_text = ft.Text("Выкупленные (0)", size=13, weight="w500", color="#A0A0B0")
+
+    tab_all_btn = ft.Container(
+        content=tab_all_text,
+        bgcolor=WB_PURPLE,
+        padding=ft.padding.symmetric(horizontal=14, vertical=8),
+        border_radius=20,
+        on_click=lambda e: set_filter("all")
+    )
+    tab_active_btn = ft.Container(
+        content=tab_active_text,
+        bgcolor=CARD_COLOR,
+        padding=ft.padding.symmetric(horizontal=14, vertical=8),
+        border_radius=20,
+        on_click=lambda e: set_filter("active")
+    )
+    tab_done_btn = ft.Container(
+        content=tab_done_text,
+        bgcolor=CARD_COLOR,
+        padding=ft.padding.symmetric(horizontal=14, vertical=8),
+        border_radius=20,
+        on_click=lambda e: set_filter("done")
+    )
+
+    filter_row = ft.Row([tab_all_btn, tab_active_btn, tab_done_btn], spacing=8, scroll="auto")
+
+    def set_filter(mode: str):
+        current_filter["mode"] = mode
+        tab_all_btn.bgcolor = WB_PURPLE if mode == "all" else CARD_COLOR
+        tab_all_text.color = "white" if mode == "all" else "#A0A0B0"
+        tab_all_text.weight = "bold" if mode == "all" else "w500"
+
+        tab_active_btn.bgcolor = WB_PURPLE if mode == "active" else CARD_COLOR
+        tab_active_text.color = "white" if mode == "active" else "#A0A0B0"
+        tab_active_text.weight = "bold" if mode == "active" else "w500"
+
+        tab_done_btn.bgcolor = WB_PURPLE if mode == "done" else CARD_COLOR
+        tab_done_text.color = "white" if mode == "done" else "#A0A0B0"
+        tab_done_text.weight = "bold" if mode == "done" else "w500"
+
+        render_tasks()
+        page.update()
 
     def update_badge(online: bool):
         if online:
@@ -142,136 +195,82 @@ def main(page: ft.Page):
             badge_dot.color = "#FF5252"
             badge_label.value = "Офлайн"
 
-    def load_list(e=None):
+    def render_tasks():
         tasks_column.controls.clear()
-        status_text.value = ""
-        try:
-            res = requests.get(f"{API_URL}/tasks", timeout=3).json()
-            update_badge(True)
-            tasks_counter.value = f"Активные задачи ({len(res)})"
+        total_count = len(cached_tasks)
+        active_items = [t for t in cached_tasks if t["bought"] < t["limit"]]
+        done_items = [t for t in cached_tasks if t["bought"] >= t["limit"]]
 
-            if not res:
-                tasks_column.controls.append(
-                    ft.Container(
-                        bgcolor=CARD_COLOR,
-                        padding=25,
-                        border_radius=16,
-                        alignment=ft.alignment.center,
-                        content=ft.Column([
-                            ft.Icon(ft.Icons.INBOX_ROUNDED, size=40, color="#666677"),
-                            ft.Text("Список отслеживания пуст", color="#888899", size=14)
-                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=8)
-                    )
+        tab_all_text.value = f"Все ({total_count})"
+        tab_active_text.value = f"Активные ({len(active_items)})"
+        tab_done_text.value = f"Выкупленные ({len(done_items)})"
+
+        mode = current_filter["mode"]
+        if mode == "active":
+            visible_items = active_items
+        elif mode == "done":
+            visible_items = done_items
+        else:
+            visible_items = cached_tasks
+
+        if not visible_items:
+            tasks_column.controls.append(
+                ft.Container(
+                    bgcolor=CARD_COLOR,
+                    padding=25,
+                    border_radius=16,
+                    alignment=ft.alignment.center,
+                    content=ft.Column([
+                        ft.Icon(ft.Icons.INBOX_ROUNDED, size=40, color="#666677"),
+                        ft.Text("В этой вкладке пока пусто", color="#888899", size=14)
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=8)
                 )
-
-            for item in res:
-                is_done = item["bought"] >= item["limit"]
-                badge_bg = "#1B3B2B" if is_done else "#2D1B3D"
-                badge_color = "#00E676" if is_done else "#E040FB"
-                badge_text = "✅ Выкуплено" if is_done else "⏳ В поиске цены"
-
-                tasks_column.controls.append(
-                    ft.Container(
-                        bgcolor=CARD_COLOR,
-                        padding=15,
-                        border_radius=16,
-                        border=ft.border.all(1, "#2A2A35"),
-                        content=ft.Row([
-                            ft.Column([
-                                ft.Row([
-                                    ft.Text(f"Арт: {item['sku']}", weight="bold", size=16, color="white"),
-                                    ft.Container(
-                                        content=ft.Text(badge_text, size=11, color=badge_color, weight="bold"),
-                                        bgcolor=badge_bg,
-                                        padding=ft.padding.symmetric(horizontal=8, vertical=3),
-                                        border_radius=8
-                                    )
-                                ], spacing=8),
-                                ft.Text(
-                                    f"Цель: до {item['target_price']} ₽  •  Куплено: {item['bought']} из {item['limit']}",
-                                    size=13,
-                                    color="#B0B0C0"
-                                )
-                            ], expand=True, spacing=6),
-                            ft.IconButton(
-                                icon=ft.Icons.DELETE_ROUNDED,
-                                icon_color="#FF5252",
-                                bgcolor="#26FF5252",
-                                tooltip="Удалить задачу",
-                                on_click=lambda _, s=item["sku"]: delete_item(s)
-                            )
-                        ])
-                    )
-                )
-        except Exception as err:
-            update_badge(False)
-            status_text.value = f"⚠️ Нет связи с Termux: {err}"
-            status_text.color = "#FF5252"
-        page.update()
-
-    def add_item(e):
-        if not sku_input.value or not price_input.value:
-            status_text.value = "⚠️ Укажите артикул и желаемую цену!"
-            status_text.color = "#FFB74D"
-            page.update()
+            )
             return
-        try:
-            data = {
-                "sku": int(sku_input.value.strip()),
-                "target_price": int(price_input.value.strip()),
-                "limit": int(limit_input.value.strip() or 1)
-            }
-            requests.post(f"{API_URL}/tasks", json=data, timeout=3)
-            sku_input.value = ""
-            price_input.value = ""
-            limit_input.value = "1"
-            load_list()
-        except Exception as err:
-            status_text.value = f"⚠️ Ошибка добавления: {err}"
-            status_text.color = "#FF5252"
-            page.update()
 
-    def delete_item(sku):
-        try:
-            requests.delete(f"{API_URL}/tasks/{sku}", timeout=3)
-            load_list()
-        except Exception:
-            pass
+        for item in visible_items:
+            is_done = item["bought"] >= item["limit"]
+            badge_bg = "#1B3B2B" if is_done else "#2D1B3D"
+            badge_color = "#00E676" if is_done else "#E040FB"
+            badge_text = "✅ Выкуплено" if is_done else "⏳ Поиск цены"
 
-    add_button = ft.Container(
-        gradient=ft.LinearGradient(colors=[WB_PURPLE, "#9C27B0"]),
-        border_radius=14,
-        height=50,
-        alignment=ft.alignment.center,
-        ink=True,
-        on_click=add_item,
-        content=ft.Row([
-            ft.Icon(ft.Icons.ADD_SHOPPING_CART_ROUNDED, color="white", size=20),
-            ft.Text("Добавить в отслеживание", color="white", weight="bold", size=15)
-        ], alignment=ft.MainAxisAlignment.CENTER, spacing=8)
-    )
+            product_name = item.get("name") or f"Товар {item['sku']}"
+            image_url = item.get("image") or ""
+            cur_sbp = item.get("current_sbp")
+            cur_wallet = item.get("current_wallet")
 
-    body = ft.Container(
-        padding=18,
-        content=ft.Column([
-            sku_input,
-            ft.Row([price_input, limit_input], spacing=10),
-            add_button,
-            status_text,
-            ft.Divider(height=15, color="#2A2A35"),
-            tasks_counter,
-            tasks_column
-        ], spacing=14)
-    )
+            if cur_sbp is not None and cur_wallet is not None:
+                prices_line = f"Сейчас: {cur_sbp} ₽ (СБП)  •  {cur_wallet} ₽ (Кошелек)"
+            else:
+                prices_line = "Сейчас: загрузка цены..."
 
-    main_view = ft.Column([header, body], visible=False, spacing=0)
-    page.add(splash_screen, main_view)
+            thumb = ft.Container(
+                width=68,
+                height=88,
+                border_radius=12,
+                bgcolor="#2A2A35",
+                clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                content=ft.Image(
+                    src=image_url,
+                    width=68,
+                    height=88,
+                    fit=ft.ImageFit.COVER,
+                    error_content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED_OUTLINED, color="#666677")
+                ) if image_url else ft.Icon(ft.Icons.SHOPPING_BAG_OUTLINED, color="#666677")
+            )
 
-    def show_main():
-        splash_screen.visible = False
-        main_view.visible = True
-        load_list()
-
-    threading.Timer(1.8, show_main).start()
-
-ft.app(target=main)
+            tasks_column.controls.append(
+                ft.Container(
+                    bgcolor=CARD_COLOR,
+                    padding=12,
+                    border_radius=16,
+                    border=ft.border.all(1, "#2A2A35"),
+                    content=ft.Row([
+                        thumb,
+                        ft.Column([
+                            ft.Text(
+                                product_name,
+                                weight="bold",
+                                size=14,
+                                color="white",
+                                max_lines=2,
