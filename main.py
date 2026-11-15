@@ -54,18 +54,14 @@ def main(page: ft.Page):
         auth_err.value, auth_err.color = "⏳ Подключение...", "#E040FB"
         page.update()
         ep = "register" if state["auth_mode"] == "register" else "login"
-        try:
-            r = requests.post(API_URL + S + ep, json={"login": u, "password": p, "tg_id": tg_in.value.strip()}, timeout=8).json()
-            if r.get("ok"):
-                state["user"] = r["login"]
-                user_lbl.value = f"Профиль: {state['user']}"
-                auth_view.visible, main_view.visible = False, True
-                load_list()
-            else:
-                auth_err.value, auth_err.color = f"⚠️ {r.get('error', 'Ошибка')}", "#FF5252"
-                page.update()
-        except Exception as err:
-            auth_err.value, auth_err.color = f"⚠️ Ошибка сети: {err}", "#FF5252"
+        r = requests.post(API_URL + S + ep, json={"login": u, "password": p, "tg_id": tg_in.value.strip()}, timeout=10).json()
+        if r.get("ok"):
+            state["user"] = r["login"]
+            user_lbl.value = f"Профиль: {state['user']}"
+            auth_view.visible, main_view.visible = False, True
+            load_list()
+        else:
+            auth_err.value, auth_err.color = f"⚠️ {r.get('error', 'Ошибка')}", "#FF5252"
             page.update()
 
     auth_btn = ft.Container(gradient=ft.LinearGradient(colors=[WB_PURPLE, "#9C27B0"]), border_radius=14, height=50, alignment=ft.alignment.center, ink=True, on_click=submit_auth, content=auth_btn_txt)
@@ -152,5 +148,10 @@ def main(page: ft.Page):
 
     def load_list():
         status_txt.value = ""
-        try:
-            state["tasks"] = requests.get(API_URL + S + "tasks", params={"user": state["user"]}, timeout=8).json()
+        res = requests.get(API_URL + S + "tasks", params={"user": state["user"]}, timeout=10)
+        if res.status_code == 200:
+            state["tasks"] = res.json()
+            dot.color, lbl.value = "#00E676", "Онлайн"
+            render()
+        else:
+            dot.color, lbl.value = "#FF5252", "Офлайн"
