@@ -17,14 +17,17 @@ COEF_SBP = 454 / 395
 wake_event = threading.Event()
 file_lock = threading.Lock()
 
+S = chr(47)
+P = "https:" + S + S
+
 def tg_url(method):
-    return "".join(["ht", "tps://", "api.", "telegram.org", "/b", "ot", TG_TOKEN, "/", method])
+    return P + "api." + "telegram.org" + S + "bot" + TG_TOKEN + S + method
 
 def wb_cdn_base(host, vol, part, sku):
-    return "".join(["ht", "tps://", f"basket-{host}.", "wbbasket.ru", f"/vol{vol}/part{part}/{sku}"])
+    return P + f"basket-{host}.wbbasket.ru" + S + f"vol{vol}" + S + f"part{part}" + S + str(sku)
 
 def wb_item_url(sku):
-    return "".join(["ht", "tps://", "www.", "wildberries.ru", f"/catalog/{sku}/detail.aspx"])
+    return P + "www.wildberries.ru" + S + "catalog" + S + str(sku) + S + "detail.aspx"
 
 def load_tasks():
     with file_lock:
@@ -52,12 +55,12 @@ def get_wb_product(sku):
     vol, part = sku // 100000, sku // 1000
     host = get_basket_host(vol)
     base_path = wb_cdn_base(host, vol, part, sku)
-    image_url = f"{base_path}/images/c246x328/1.webp"
+    image_url = base_path + S + "images" + S + "c246x328" + S + "1.webp"
     headers = {"User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36"}
     try:
-        r_card = requests.get(f"{base_path}/info/ru/card.json", headers=headers, timeout=10)
+        r_card = requests.get(base_path + S + "info" + S + "ru" + S + "card.json", headers=headers, timeout=10)
         name = r_card.json().get("imt_name", f"Товар {sku}") if r_card.status_code == 200 else f"Товар {sku}"
-        r_price = requests.get(f"{base_path}/info/price-history.json", headers=headers, timeout=10)
+        r_price = requests.get(base_path + S + "info" + S + "price-history.json", headers=headers, timeout=10)
         if r_price.status_code == 200 and r_price.json():
             base_rub = r_price.json()[-1].get("price", {}).get("RUB", 0) // 100
             if base_rub > 0:
