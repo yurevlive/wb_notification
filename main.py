@@ -1,7 +1,4 @@
-import time
-import threading
 import flet as ft
-import flet_webview as fwv
 import requests
 
 HOST = "127.0.0." + "1:8000"
@@ -18,20 +15,6 @@ def main(page: ft.Page):
     limit_input = ft.TextField(label="Лимит покупок (шт.)", value="1", keyboard_type=ft.KeyboardType.NUMBER)
     status_text = ft.Text("", size=14)
     tasks_column = ft.Column(spacing=10)
-
-    wb_site = "https://www.wildberries" + ".ru"
-    webview = fwv.WebView(
-        url=f"{wb_site}/lk/basket",
-        expand=True,
-        height=420,
-        visible=False
-    )
-
-    def toggle_wb_browser(e=None):
-        webview.visible = not webview.visible
-        if webview.visible:
-            webview.url = f"{wb_site}/lk/basket"
-        page.update()
 
     def load_list(e=None):
         tasks_column.controls.clear()
@@ -96,58 +79,11 @@ def main(page: ft.Page):
         except Exception:
             pass
 
-    def auto_buyer_loop():
-        while True:
-            try:
-                r = requests.get(f"{API_URL}/pending_buy", timeout=3).json()
-                sku = r.get("sku")
-                if sku:
-                    status_text.value = f"🔥 Цена упала! Открываю корзину для автовыкупа {sku}..."
-                    status_text.color = "green"
-                    webview.visible = True
-                    webview.url = f"{wb_site}/catalog/{sku}/detail.aspx"
-                    page.update()
-                    time.sleep(6)
-
-                    js_add = """
-                    setTimeout(() => {
-                        let btns = Array.from(document.querySelectorAll('button'));
-                        let buyBtn = btns.find(b => b.innerText.includes('корзину') || b.innerText.includes('Купить'));
-                        if (buyBtn) buyBtn.click();
-                    }, 1000);
-                    """
-                    webview.run_javascript(js_add)
-                    time.sleep(4)
-
-                    webview.url = f"{wb_site}/lk/basket"
-                    page.update()
-                    time.sleep(6)
-
-                    js_order = """
-                    setTimeout(() => {
-                        let btns = Array.from(document.querySelectorAll('button'));
-                        let orderBtn = btns.find(b => b.innerText.includes('Заказать'));
-                        if (orderBtn && !orderBtn.disabled) orderBtn.click();
-                    }, 1500);
-                    """
-                    webview.run_javascript(js_order)
-                    time.sleep(5)
-
-                    requests.post(f"{API_URL}/confirm_buy/{sku}", timeout=3)
-                    load_list()
-            except Exception:
-                pass
-            time.sleep(5)
-
-    threading.Thread(target=auto_buyer_loop, daemon=True).start()
-
     page.add(
         ft.Row([
             ft.Text("WB Автозаказ", size=22, weight="bold", expand=True),
-            ft.ElevatedButton("Браузер WB", on_click=toggle_wb_browser),
             ft.IconButton(icon=ft.Icons.REFRESH, on_click=load_list)
         ]),
-        webview,
         sku_input,
         price_input,
         limit_input,
