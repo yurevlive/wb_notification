@@ -19,9 +19,9 @@ def main(page: ft.Page):
     ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER))
 
     a_title = ft.Text("Вход в кабинет", size=24, weight="bold", color="white")
-    u_in = ft.TextField(hint_text="Логин", border_radius=12, filled=True, bgcolor=CARD)
-    p_in = ft.TextField(hint_text="Пароль", password=True, border_radius=12, filled=True, bgcolor=CARD)
-    tg_in = ft.TextField(hint_text="Telegram ID (необязательно)", border_radius=12, filled=True, bgcolor=CARD, visible=False)
+    u_in = ft.TextField(hint_text="Логин (от 3 символов)", border_radius=12, filled=True, bgcolor=CARD)
+    p_in = ft.TextField(hint_text="Пароль (от 4 символов)", password=True, border_radius=12, filled=True, bgcolor=CARD)
+    tg_in = ft.TextField(hint_text="Числовой Telegram ID (необязательно)", border_radius=12, filled=True, bgcolor=CARD, visible=False)
     a_err = ft.Text("", size=13, color="#FF5252")
     a_btn_t = ft.Text("Войти", color="white", weight="bold")
     sw_t = ft.Text("Нет аккаунта? Регистрация", size=13, color="#E040FB")
@@ -37,24 +37,33 @@ def main(page: ft.Page):
     def auth(e):
         u, p = u_in.value.strip().lower(), p_in.value.strip()
         if not u or not p:
-            a_err.value = "Введите логин и пароль"
+            a_err.value, a_err.color = "⚠️ Введите логин и пароль", "#FFB74D"
             page.update()
             return
+        a_err.value, a_err.color = "⏳ Подключаюсь к серверу...", "#E040FB"
+        page.update()
         ep = "register" if st["reg"] else "login"
-        r = requests.post(API + S + ep, json={"login": u, "password": p, "tg_id": tg_in.value.strip()}, timeout=10).json()
-        if r.get("ok"):
-            st["user"] = r["login"]
-            u_lbl.value = f"Кабинет: {st['user']}"
-            auth_box.visible, main_box.visible = False, True
-            load()
-        else:
-            a_err.value = r.get("error", "Ошибка")
-            page.update()
+        try:
+            resp = requests.post(API + S + ep, json={"login": u, "password": p, "tg_id": tg_in.value.strip()}, timeout=10)
+            if resp.status_code in (200, 400, 401):
+                r = resp.json()
+                if r.get("ok"):
+                    st["user"] = r["login"]
+                    u_lbl.value = f"Кабинет: {st['user']}"
+                    auth_box.visible, main_box.visible = False, True
+                    load()
+                    return
+                a_err.value, a_err.color = f"⚠️ {r.get('error', 'Ошибка')}", "#FF5252"
+            else:
+                a_err.value, a_err.color = f"⚠️ Сервер ответил кодом {resp.status_code} (обновите flask_app.py)", "#FF5252"
+        except Exception as ex:
+            a_err.value, a_err.color = f"⚠️ Ошибка сети: {ex}", "#FF5252"
+        page.update()
 
     auth_box = ft.Container(visible=False, padding=24, content=ft.Column([
         ft.Icon(ft.Icons.ACCOUNT_CIRCLE_ROUNDED, size=70, color=P1), a_title, u_in, p_in, tg_in, a_err,
-        ft.Container(bgcolor=P1, border_radius=12, height=48, alignment=ft.alignment.center, on_click=auth, content=a_btn_t),
-        ft.Container(content=sw_t, on_click=toggle, padding=8)
+        ft.ElevatedButton(content=a_btn_t, bgcolor=P1, height=48, width=320, on_click=auth),
+        ft.TextButton(content=sw_t, on_click=toggle)
     ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=12))
 
     u_lbl = ft.Text("Кабинет", size=12, color="#E0E0E0")
@@ -104,7 +113,7 @@ def main(page: ft.Page):
         requests.delete(API + S + "tasks" + S + str(sku), params={"user": st["user"]}, timeout=10)
         load()
 
-    add_b = ft.Container(bgcolor=P1, border_radius=12, height=48, alignment=ft.alignment.center, on_click=add, content=ft.Text("Добавить в отслеживание", color="white", weight="bold"))
+    add_b = ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=48, width=320, on_click=add)
     main_box = ft.Column([hdr, ft.Container(padding=16, content=ft.Column([sku_in, ft.Row([pr_in, lim_in]), add_b, col], spacing=12))], visible=False)
     page.add(splash, auth_box, main_box)
 
