@@ -1,4 +1,4 @@
-import asyncio
+import threading
 import flet as ft
 import requests
 
@@ -10,7 +10,7 @@ WB_DARK = "#481173"
 BG_COLOR = "#121216"
 CARD_COLOR = "#1E1E26"
 
-async def main(page: ft.Page):
+def main(page: ft.Page):
     page.title = "WB.Track [by.Жекич]"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG_COLOR
@@ -18,13 +18,12 @@ async def main(page: ft.Page):
     page.scroll = "adaptive"
 
     # ==========================================
-    # АНИМИРОВАННАЯ ЗАСТАВКА ПРИ ЗАПУСКЕ
+    # ЗАСТАВКА ПРИ ЗАПУСКЕ
     # ==========================================
-    splash_content = ft.Container(
-        opacity=0,
-        scale=0.85,
-        animate_opacity=ft.animation.Animation(600, ft.AnimationCurve.EASE_OUT),
-        animate_scale=ft.animation.Animation(600, ft.AnimationCurve.EASE_OUT),
+    splash_screen = ft.Container(
+        height=620,
+        bgcolor=BG_COLOR,
+        alignment=ft.alignment.center,
         content=ft.Column([
             ft.Container(
                 width=84,
@@ -54,13 +53,6 @@ async def main(page: ft.Page):
                 text_align=ft.TextAlign.CENTER
             )
         ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=4)
-    )
-
-    splash_screen = ft.Container(
-        height=650,
-        bgcolor=BG_COLOR,
-        alignment=ft.alignment.center,
-        content=splash_content
     )
 
     # ==========================================
@@ -272,3 +264,14 @@ async def main(page: ft.Page):
         ], spacing=14)
     )
 
+    main_view = ft.Column([header, body], visible=False, spacing=0)
+    page.add(splash_screen, main_view)
+
+    def show_main():
+        splash_screen.visible = False
+        main_view.visible = True
+        load_list()
+
+    threading.Timer(1.8, show_main).start()
+
+ft.app(target=main)
