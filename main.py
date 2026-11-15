@@ -50,12 +50,13 @@ def main(page: ft.Page):
                 if r.get("ok"):
                     st["user"] = r["login"]
                     u_lbl.value = f"Кабинет: {st['user']}"
+                    a_err.value = ""
                     auth_box.visible, main_box.visible = False, True
                     load()
                     return
                 a_err.value, a_err.color = f"⚠️ {r.get('error', 'Ошибка')}", "#FF5252"
             else:
-                a_err.value, a_err.color = f"⚠️ Сервер ответил кодом {resp.status_code} (обновите flask_app.py)", "#FF5252"
+                a_err.value, a_err.color = f"⚠️ Ошибка сервера ({resp.status_code})", "#FF5252"
         except Exception as ex:
             a_err.value, a_err.color = f"⚠️ Ошибка сети: {ex}", "#FF5252"
         page.update()
@@ -66,13 +67,23 @@ def main(page: ft.Page):
         ft.TextButton(content=sw_t, on_click=toggle)
     ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=12))
 
+    def logout(e):
+        st["user"] = ""
+        st["tasks"] = []
+        col.controls.clear()
+        p_in.value = ""
+        a_err.value = ""
+        main_box.visible, auth_box.visible = False, True
+        page.update()
+
     u_lbl = ft.Text("Кабинет", size=12, color="#E0E0E0")
     dot = ft.Icon(ft.Icons.CIRCLE, size=10, color="#00E676")
     lbl = ft.Text("Онлайн", size=12, color="white")
     hdr = ft.Container(gradient=ft.LinearGradient(colors=[P2, P1]), padding=20, content=ft.Row([
         ft.Column([ft.Text("WB.Track [by.Жекич]", size=19, weight="bold", color="white"), u_lbl], expand=True),
         ft.Row([dot, lbl], spacing=4),
-        ft.IconButton(icon=ft.Icons.REFRESH_ROUNDED, icon_color="white", on_click=lambda e: load())
+        ft.IconButton(icon=ft.Icons.REFRESH_ROUNDED, icon_color="white", tooltip="Обновить", on_click=lambda e: load()),
+        ft.IconButton(icon=ft.Icons.LOGOUT_ROUNDED, icon_color="white", tooltip="Выйти из аккаунта", on_click=logout)
     ]))
 
     sku_in = ft.TextField(hint_text="Артикул WB", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD)
