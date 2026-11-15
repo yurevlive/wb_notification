@@ -27,35 +27,33 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Flet and CairoSVG
-        run: pip install flet==0.25.2 cairosvg
+      - name: Install Flet and Pillow
+        run: pip install flet==0.25.2 pillow
 
-      - name: Generate App Icon from SVG
+      - name: Generate App Icon
         run: |
           mkdir -p assets
-          cat << 'EOF' > assets/icon.svg
-          <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://w3.org">
-            <defs>
-              <linearGradient id="bgGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stop-color="#1E142B"/>
-                <stop offset="100%" stop-color="#0D0914"/>
-              </linearGradient>
-              <linearGradient id="neonGrad" x1="120" y1="120" x2="392" y2="392" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stop-color="#D946EF"/>
-                <stop offset="100%" stop-color="#7C3AED"/>
-              </linearGradient>
-            </defs>
-            <rect width="512" height="512" rx="115" fill="url(#bgGrad)"/>
-            <circle cx="256" cy="256" r="145" stroke="url(#neonGrad)" stroke-width="18" stroke-dasharray="160 65"/>
-            <rect x="247" y="75" width="18" height="45" rx="9" fill="#D946EF"/>
-            <rect x="247" y="392" width="18" height="45" rx="9" fill="#7C3AED"/>
-            <rect x="75" y="247" width="45" height="18" rx="9" fill="#D946EF"/>
-            <rect x="392" y="247" width="45" height="18" rx="9" fill="#7C3AED"/>
-            <path d="M256 175V325M256 325L195 265M256 325L317 265" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          cat << 'EOF' > make_icon.py
+          from PIL import Image, ImageDraw
+          img = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+          d = ImageDraw.Draw(img)
+          # Темно-фиолетовый скругленный фон
+          d.rounded_rectangle((0, 0, 1024, 1024), radius=230, fill="#1E142B")
+          # Неоновое кольцо прицела
+          d.ellipse((222, 222, 802, 802), outline="#D946EF", width=36)
+          # 4 засечки прицела
+          d.rounded_rectangle((494, 150, 530, 240), radius=18, fill="#D946EF")
+          d.rounded_rectangle((494, 784, 530, 874), radius=18, fill="#7C3AED")
+          d.rounded_rectangle((150, 494, 240, 530), radius=18, fill="#D946EF")
+          d.rounded_rectangle((784, 494, 874, 530), radius=18, fill="#7C3AED")
+          # Белая стрелка снижения цены по центру
+          d.line((512, 350, 512, 650), fill="#FFFFFF", width=52)
+          d.line((390, 530, 512, 650), fill="#FFFFFF", width=52)
+          d.line((634, 530, 512, 650), fill="#FFFFFF", width=52)
+          img.save("assets/icon.png")
           EOF
-          python -c 'import cairosvg; cairosvg.svg2png(url="assets/icon.svg", write_to="assets/icon.png", output_width=1024, output_height=1024)'
-          rm assets/icon.svg
+          python make_icon.py
+          rm make_icon.py
 
       - name: Build APK
         run: flet build apk --project "wb-track" --product "WB.Track [by.Жекич]"
