@@ -10,6 +10,11 @@ def main(page: ft.Page):
     page.title = "WB.Track [by.Жекич]"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor, page.padding, page.scroll = BG, 0, "adaptive"
+    page.locale_configuration = ft.LocaleConfiguration(
+        supported_locales=[ft.Locale("ru", "RU")],
+        current_locale=ft.Locale("ru", "RU")
+    )
+
     st = {"mode": "all", "tasks": [], "user": "", "reg": False}
 
     splash = ft.Container(height=620, bgcolor=BG, alignment=ft.alignment.center, content=ft.Column([
@@ -20,8 +25,9 @@ def main(page: ft.Page):
 
     a_title = ft.Text("Вход в кабинет", size=24, weight="bold", color="white")
     u_in = ft.TextField(hint_text="Логин (от 3 символов)", border_radius=12, filled=True, bgcolor=CARD)
-    p_in = ft.TextField(hint_text="Пароль (от 4 символов)", password=True, border_radius=12, filled=True, bgcolor=CARD)
+    p_in = ft.TextField(hint_text="Пароль (от 4 символов)", password=True, can_reveal_password=True, border_radius=12, filled=True, bgcolor=CARD)
     tg_in = ft.TextField(hint_text="Числовой Telegram ID (необязательно)", border_radius=12, filled=True, bgcolor=CARD, visible=False)
+    rem_chk = ft.Checkbox(label="Запомнить меня", value=True, active_color=P1)
     a_err = ft.Text("", size=13, color="#FF5252")
     a_btn_t = ft.Text("Войти", color="white", weight="bold")
     sw_t = ft.Text("Нет аккаунта? Регистрация", size=13, color="#E040FB")
@@ -33,6 +39,13 @@ def main(page: ft.Page):
         sw_t.value = "Уже есть аккаунт? Войти" if st["reg"] else "Нет аккаунта? Регистрация"
         tg_in.visible, a_err.value = st["reg"], ""
         page.update()
+
+    def enter_cabinet(username):
+        st["user"] = username
+        u_lbl.value = f"Кабинет: {username}"
+        a_err.value = ""
+        auth_box.visible, main_box.visible = False, True
+        load()
 
     def auth(e):
         u, p = u_in.value.strip().lower(), p_in.value.strip()
@@ -48,11 +61,11 @@ def main(page: ft.Page):
             if resp.status_code in (200, 400, 401):
                 r = resp.json()
                 if r.get("ok"):
-                    st["user"] = r["login"]
-                    u_lbl.value = f"Кабинет: {st['user']}"
-                    a_err.value = ""
-                    auth_box.visible, main_box.visible = False, True
-                    load()
+                    if rem_chk.value:
+                        page.client_storage.set("wb_saved_user", r["login"])
+                    else:
+                        page.client_storage.remove("wb_saved_user")
+                    enter_cabinet(r["login"])
                     return
                 a_err.value, a_err.color = f"⚠️ {r.get('error', 'Ошибка')}", "#FF5252"
             else:
@@ -62,10 +75,12 @@ def main(page: ft.Page):
         page.update()
 
     auth_box = ft.Container(visible=False, padding=24, content=ft.Column([
-        ft.Icon(ft.Icons.ACCOUNT_CIRCLE_ROUNDED, size=70, color=P1), a_title, u_in, p_in, tg_in, a_err,
+        ft.Icon(ft.Icons.ACCOUNT_CIRCLE_ROUNDED, size=70, color=P1), a_title, u_in, p_in, tg_in,
+        ft.Row([rem_chk], alignment=ft.MainAxisAlignment.START),
+        a_err,
         ft.ElevatedButton(content=a_btn_t, bgcolor=P1, height=48, width=320, on_click=auth),
         ft.TextButton(content=sw_t, on_click=toggle)
-    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=12))
+    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
 
     def logout(e):
         st["user"] = ""
@@ -73,6 +88,7 @@ def main(page: ft.Page):
         col.controls.clear()
         p_in.value = ""
         a_err.value = ""
+        page.client_storage.remove("wb_saved_user")
         main_box.visible, auth_box.visible = False, True
         page.update()
 
@@ -128,9 +144,19 @@ def main(page: ft.Page):
     main_box = ft.Column([hdr, ft.Container(padding=16, content=ft.Column([sku_in, ft.Row([pr_in, lim_in]), add_b, col], spacing=12))], visible=False)
     page.add(splash, auth_box, main_box)
 
+    saved_user = ""
+    try:
+        saved_user = page.client_storage.get("wb_saved_user") or ""
+    except Exception:
+        saved_user = ""
+
     def go():
-        splash.visible, auth_box.visible = False, True
-        page.update()
+        splash.visible = False
+        if saved_user:
+            enter_cabinet(saved_user)
+        else:
+            auth_box.visible = True
+            page.update()
 
     threading.Timer(1.5, go).start()
 
