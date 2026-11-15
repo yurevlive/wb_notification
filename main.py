@@ -1,5 +1,4 @@
-import time
-import threading
+import asyncio
 import flet as ft
 import requests
 
@@ -11,7 +10,7 @@ WB_DARK = "#481173"
 BG_COLOR = "#121216"
 CARD_COLOR = "#1E1E26"
 
-def main(page: ft.Page):
+async def main(page: ft.Page):
     page.title = "WB.Track [by.Жекич]"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG_COLOR
@@ -24,8 +23,8 @@ def main(page: ft.Page):
     splash_content = ft.Container(
         opacity=0,
         scale=0.85,
-        animate_opacity=ft.animation.Animation(700, ft.AnimationCurve.EASE_OUT),
-        animate_scale=ft.animation.Animation(700, ft.AnimationCurve.EASE_OUT_BACK),
+        animate_opacity=ft.animation.Animation(600, ft.AnimationCurve.EASE_OUT),
+        animate_scale=ft.animation.Animation(600, ft.AnimationCurve.EASE_OUT),
         content=ft.Column([
             ft.Container(
                 width=84,
@@ -58,7 +57,7 @@ def main(page: ft.Page):
     )
 
     splash_screen = ft.Container(
-        expand=True,
+        height=650,
         bgcolor=BG_COLOR,
         alignment=ft.alignment.center,
         content=splash_content
