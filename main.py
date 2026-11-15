@@ -75,7 +75,7 @@ def main(page: ft.Page):
     )
 
     limit_input = ft.TextField(
-        label="Лимит (шт.)",
+        label="Лимит",
         value="1",
         prefix_icon=ft.Icons.SHOPPING_BAG_OUTLINED,
         keyboard_type=ft.KeyboardType.NUMBER,
@@ -84,7 +84,7 @@ def main(page: ft.Page):
         bgcolor=CARD_COLOR,
         border_color="transparent",
         focused_border_color=WB_PURPLE,
-        width=130
+        width=165
     )
 
     status_text = ft.Text("", size=13, weight="w500")
@@ -93,11 +93,11 @@ def main(page: ft.Page):
 
     def update_badge(online: bool):
         if online:
-            server_badge.content.controls.color = "#00E676"
-            server_badge.content.controls.value = "Онлайн"
+            server_badge.content.controls[0].color = "#00E676"
+            server_badge.content.controls[1].value = "Онлайн"
         else:
-            server_badge.content.controls.color = "#FF5252"
-            server_badge.content.controls.value = "Офлайн"
+            server_badge.content.controls[0].color = "#FF5252"
+            server_badge.content.controls[1].value = "Офлайн"
 
     def load_list(e=None):
         tasks_column.controls.clear()
