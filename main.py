@@ -11,9 +11,9 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor, page.padding = BG, 0
 
-    st_lbl = ft.Text("Проверка обновлений...", size=13, color="#E040FB")
+    st_lbl = ft.Text("Проверка обновлений...", size=13, color="#E040FB", text_align=ft.TextAlign.CENTER)
     splash = ft.Container(
-        height=620, bgcolor=BG, alignment=ft.alignment.center,
+        height=620, bgcolor=BG, alignment=ft.alignment.center, padding=20,
         content=ft.Column([
             ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=64, color=P1),
             ft.Text("WB.Track", size=38, weight="bold", color="white"),
@@ -25,27 +25,20 @@ def main(page: ft.Page):
     page.add(splash)
 
     def boot():
-        code = ""
         try:
-            r = requests.get(API + S + "get_ui", timeout=8)
-            if r.status_code == 200 and "def run_app" in r.text:
-                code = r.text
-                page.client_storage.set("cached_ui", code)
-        except Exception:
-            pass
-
-        if not code:
-            code = page.client_storage.get("cached_ui") or ""
-
-        if code:
+            r = requests.get(API + S + "get_ui", timeout=10)
+            if r.status_code != 200:
+                st_lbl.value, st_lbl.color = f"Ошибка сервера: {r.status_code}", "#FF5252"
+                page.update()
+                return
             ns = {}
-            exec(code, ns)
+            exec(r.text, ns)
             ns["run_app"](page)
-        else:
-            st_lbl.value = "⚠️ Нет связи с сервером"
+        except Exception as ex:
+            st_lbl.value = f"Ошибка: {ex}"
             st_lbl.color = "#FF5252"
             page.update()
 
-    threading.Timer(1.0, boot).start()
+    threading.Timer(0.8, boot).start()
 
 ft.app(target=main)
