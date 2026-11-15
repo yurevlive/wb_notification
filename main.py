@@ -50,20 +50,19 @@ def main(page: ft.Page):
     )
 
     sku_input = ft.TextField(
-        label="Артикул товара WB",
-        hint_text="Например: 596432419",
+        hint_text="Артикул товара WB (например, 596432419)",
         prefix_icon=ft.Icons.QR_CODE_2_ROUNDED,
         keyboard_type=ft.KeyboardType.NUMBER,
         border_radius=14,
         filled=True,
         bgcolor=CARD_COLOR,
         border_color="transparent",
-        focused_border_color=WB_PURPLE
+        focused_border_color=WB_PURPLE,
+        content_padding=ft.padding.symmetric(horizontal=14, vertical=16)
     )
 
     price_input = ft.TextField(
-        label="Желаемая цена до (₽)",
-        hint_text="СБП / при получении",
+        hint_text="Желаемая цена до (₽)",
         prefix_icon=ft.Icons.CURRENCY_RUBLE_ROUNDED,
         keyboard_type=ft.KeyboardType.NUMBER,
         border_radius=14,
@@ -71,12 +70,13 @@ def main(page: ft.Page):
         bgcolor=CARD_COLOR,
         border_color="transparent",
         focused_border_color=WB_PURPLE,
+        content_padding=ft.padding.symmetric(horizontal=14, vertical=16),
         expand=True
     )
 
     limit_input = ft.TextField(
-        label="Лимит",
         value="1",
+        prefix_text="Шт: ",
         prefix_icon=ft.Icons.SHOPPING_BAG_OUTLINED,
         keyboard_type=ft.KeyboardType.NUMBER,
         border_radius=14,
@@ -84,7 +84,8 @@ def main(page: ft.Page):
         bgcolor=CARD_COLOR,
         border_color="transparent",
         focused_border_color=WB_PURPLE,
-        width=165
+        content_padding=ft.padding.symmetric(horizontal=12, vertical=16),
+        width=155
     )
 
     status_text = ft.Text("", size=13, weight="w500")
@@ -93,11 +94,11 @@ def main(page: ft.Page):
 
     def update_badge(online: bool):
         if online:
-            server_badge.content.controls[0].color = "#00E676"
-            server_badge.content.controls[1].value = "Онлайн"
+            server_badge.content.controls.color = "#00E676"
+            server_badge.content.controls.value = "Онлайн"
         else:
-            server_badge.content.controls[0].color = "#FF5252"
-            server_badge.content.controls[1].value = "Офлайн"
+            server_badge.content.controls.color = "#FF5252"
+            server_badge.content.controls.value = "Офлайн"
 
     def load_list(e=None):
         tasks_column.controls.clear()
@@ -218,7 +219,7 @@ def main(page: ft.Page):
             ft.Divider(height=15, color="#2A2A35"),
             tasks_counter,
             tasks_column
-        ], spacing=12)
+        ], spacing=14)
     )
 
     page.add(header, body)
