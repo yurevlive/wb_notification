@@ -17,6 +17,15 @@ COEF_SBP = 454 / 395
 wake_event = threading.Event()
 file_lock = threading.Lock()
 
+def tg_url(method):
+    return "".join(["ht", "tps://", "api.", "telegram.org", "/b", "ot", TG_TOKEN, "/", method])
+
+def wb_cdn_base(host, vol, part, sku):
+    return "".join(["ht", "tps://", f"basket-{host}.", "wbbasket.ru", f"/vol{vol}/part{part}/{sku}"])
+
+def wb_item_url(sku):
+    return "".join(["ht", "tps://", "www.", "wildberries.ru", f"/catalog/{sku}/detail.aspx"])
+
 def load_tasks():
     with file_lock:
         if not os.path.exists(DATA_FILE):
@@ -42,7 +51,7 @@ def get_basket_host(vol):
 def get_wb_product(sku):
     vol, part = sku // 100000, sku // 1000
     host = get_basket_host(vol)
-    base_path = f"https://basket-{host}.wbbasket.ru/vol{vol}/part{part}/{sku}"
+    base_path = wb_cdn_base(host, vol, part, sku)
     image_url = f"{base_path}/images/c246x328/1.webp"
     headers = {"User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36"}
     try:
@@ -89,13 +98,12 @@ def delete_task(sku):
 
 def send_tg(chat_id, text):
     try:
-        requests.post(f"https://telegram.org{TG_TOKEN}/sendMessage", json={"chat_id": chat_id, "text": text}, timeout=10)
+        requests.post(tg_url("sendMessage"), json={"chat_id": chat_id, "text": text}, timeout=10)
     except Exception as e:
         print(f"Ошибка TG: {e}")
 
 def open_in_yandex(sku):
-    url = f"https://wildberries.ru{sku}/detail.aspx"
-    subprocess.run(["am", "start", "-a", "android.intent.action.VIEW", "-d", url, "-p", "com.yandex.browser"], check=False)
+    subprocess.run(["am", "start", "-a", "android.intent.action.VIEW", "-d", wb_item_url(sku), "-p", "com.yandex.browser"], check=False)
 
 def handle_tg_text(chat_id, text):
     if text.startswith(("/start", "/help")):
@@ -115,15 +123,15 @@ def handle_tg_text(chat_id, text):
         return
     if text.startswith("/del"):
         parts = text.split()
-        if len(parts) >= 2 and parts[1].isdigit():
-            ok = remove_task(int(parts[1]))
-            send_tg(chat_id, f"🗑 Артикул {parts[1]} удален." if ok else f"⚠️ Артикул {parts[1]} не найден.")
+        if len(parts) >= 2 and parts.isdigit():
+            ok = remove_task(int(parts))
+            send_tg(chat_id, f"🗑 Артикул {parts} удален." if ok else f"⚠️ Артикул {parts} не найден.")
         return
 
     parts = text.replace(",", " ").split()
-    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
-        sku, target = int(parts[0]), int(parts[1])
-        limit = int(parts[2]) if (len(parts) >= 3 and parts[2].isdigit()) else 1
+    if len(parts) >= 2 and parts.isdigit() and parts.isdigit():
+        sku, target = int(parts), int(parts)
+        limit = int(parts) if (len(parts) >= 3 and parts.isdigit()) else 1
         send_tg(chat_id, "⏳ Загружаю товар...")
         item = create_or_update_task(sku, target, limit)
         cur = f"{item['current_sbp']} ₽" if item["current_sbp"] else "—"
@@ -136,7 +144,7 @@ def telegram_listener():
     offset = 0
     while True:
         try:
-            r = requests.get(f"https://telegram.org{TG_TOKEN}/getUpdates", params={"offset": offset, "timeout": 25}, timeout=30)
+            r = requests.get(tg_url("getUpdates"), params={"offset": offset, "timeout": 25}, timeout=30)
             if r.status_code == 200:
                 for upd in r.json().get("result", []):
                     offset = upd["update_id"] + 1
