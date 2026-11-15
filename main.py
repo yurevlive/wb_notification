@@ -1,3 +1,5 @@
+import time
+import threading
 import flet as ft
 import requests
 
@@ -16,6 +18,55 @@ def main(page: ft.Page):
     page.padding = 0
     page.scroll = "adaptive"
 
+    # ==========================================
+    # АНИМИРОВАННАЯ ЗАСТАВКА ПРИ ЗАПУСКЕ
+    # ==========================================
+    splash_content = ft.Container(
+        opacity=0,
+        scale=0.85,
+        animate_opacity=ft.animation.Animation(700, ft.AnimationCurve.EASE_OUT),
+        animate_scale=ft.animation.Animation(700, ft.AnimationCurve.EASE_OUT_BACK),
+        content=ft.Column([
+            ft.Container(
+                width=84,
+                height=84,
+                border_radius=24,
+                gradient=ft.LinearGradient(
+                    begin=ft.alignment.top_left,
+                    end=ft.alignment.bottom_right,
+                    colors=[WB_PURPLE, "#7C3AED"]
+                ),
+                alignment=ft.alignment.center,
+                content=ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=46, color="white")
+            ),
+            ft.Container(height=12),
+            ft.Text(
+                "WB.Track",
+                size=38,
+                weight="bold",
+                color="white",
+                text_align=ft.TextAlign.CENTER
+            ),
+            ft.Text(
+                "[by.Жекич]",
+                size=18,
+                weight="w500",
+                color="#E040FB",
+                text_align=ft.TextAlign.CENTER
+            )
+        ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=4)
+    )
+
+    splash_screen = ft.Container(
+        expand=True,
+        bgcolor=BG_COLOR,
+        alignment=ft.alignment.center,
+        content=splash_content
+    )
+
+    # ==========================================
+    # ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ
+    # ==========================================
     badge_dot = ft.Icon(ft.Icons.CIRCLE, size=10, color="#00E676")
     badge_label = ft.Text("Онлайн", size=12, color="white", weight="w500")
 
@@ -222,7 +273,3 @@ def main(page: ft.Page):
         ], spacing=14)
     )
 
-    page.add(header, body)
-    load_list()
-
-ft.app(target=main)
