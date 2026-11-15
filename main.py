@@ -16,11 +16,11 @@ def main(page: ft.Page):
     page.padding = 0
     page.scroll = "adaptive"
 
+    badge_dot = ft.Icon(ft.Icons.CIRCLE, size=10, color="#00E676")
+    badge_label = ft.Text("Онлайн", size=12, color="white", weight="w500")
+
     server_badge = ft.Container(
-        content=ft.Row([
-            ft.Icon(ft.Icons.CIRCLE, size=10, color="#00E676"),
-            ft.Text("Онлайн", size=12, color="white", weight="w500")
-        ], spacing=5),
+        content=ft.Row([badge_dot, badge_label], spacing=5),
         bgcolor="#2A1B3D",
         padding=ft.padding.symmetric(horizontal=10, vertical=5),
         border_radius=20
@@ -94,11 +94,11 @@ def main(page: ft.Page):
 
     def update_badge(online: bool):
         if online:
-            server_badge.content.controls.color = "#00E676"
-            server_badge.content.controls.value = "Онлайн"
+            badge_dot.color = "#00E676"
+            badge_label.value = "Онлайн"
         else:
-            server_badge.content.controls.color = "#FF5252"
-            server_badge.content.controls.value = "Офлайн"
+            badge_dot.color = "#FF5252"
+            badge_label.value = "Офлайн"
 
     def load_list(e=None):
         tasks_column.controls.clear()
