@@ -1,6 +1,7 @@
 import time
 import threading
 import flet as ft
+import flet_webview as fwv
 import requests
 
 HOST = "127.0.0." + "1:8000"
@@ -19,7 +20,7 @@ def main(page: ft.Page):
     tasks_column = ft.Column(spacing=10)
 
     wb_site = "https://www.wildberries" + ".ru"
-    webview = ft.WebView(
+    webview = fwv.WebView(
         url=f"{wb_site}/lk/basket",
         expand=True,
         height=420,
@@ -108,7 +109,6 @@ def main(page: ft.Page):
                     page.update()
                     time.sleep(6)
 
-                    # Нажимаем "Добавить в корзину" или "Купить сейчас" на странице товара
                     js_add = """
                     setTimeout(() => {
                         let btns = Array.from(document.querySelectorAll('button'));
@@ -119,7 +119,6 @@ def main(page: ft.Page):
                     webview.run_javascript(js_add)
                     time.sleep(4)
 
-                    # Переходим в корзину и нажимаем "Заказать"
                     webview.url = f"{wb_site}/lk/basket"
                     page.update()
                     time.sleep(6)
