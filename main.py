@@ -2,7 +2,8 @@ import threading
 import flet as ft
 import requests
 
-API_URL = "https://pythonanywhere.com"
+S = chr(47)
+API_URL = "".join(["ht", "tps:", S, S, "yurevlive.", "pythonanywhere.", "com"])
 WB_PURPLE = "#CB11AB"
 WB_DARK = "#481173"
 BG_COLOR = "#121216"
@@ -92,7 +93,7 @@ def main(page: ft.Page):
     def load_list():
         status_txt.value = ""
         try:
-            state["tasks"] = requests.get(f"{API_URL}/tasks", timeout=8).json()
+            state["tasks"] = requests.get(API_URL + S + "tasks", timeout=8).json()
             dot.color, lbl.value = "#00E676", "Онлайн"
             render()
         except Exception as err:
@@ -108,7 +109,7 @@ def main(page: ft.Page):
         status_txt.value, status_txt.color = "⏳ Загружаю фото и цену...", "#E040FB"
         page.update()
         try:
-            requests.post(f"{API_URL}/tasks", json={"sku": int(sku_in.value.strip()), "target_price": int(price_in.value.strip()), "limit": int(limit_in.value.strip() or 1)}, timeout=10)
+            requests.post(API_URL + S + "tasks", json={"sku": int(sku_in.value.strip()), "target_price": int(price_in.value.strip()), "limit": int(limit_in.value.strip() or 1)}, timeout=10)
             sku_in.value, price_in.value, limit_in.value = "", "", "1"
             load_list()
         except Exception as err:
@@ -116,7 +117,7 @@ def main(page: ft.Page):
             page.update()
 
     def del_item(sku):
-        requests.delete(f"{API_URL}/tasks/{sku}", timeout=8)
+        requests.delete(API_URL + S + "tasks" + S + str(sku), timeout=8)
         load_list()
 
     add_btn = ft.Container(gradient=ft.LinearGradient(colors=[WB_PURPLE, "#9C27B0"]), border_radius=14, height=50, alignment=ft.alignment.center, ink=True, on_click=add_item, content=ft.Row([ft.Icon(ft.Icons.ADD_SHOPPING_CART_ROUNDED, color="white", size=20), ft.Text("Добавить в отслеживание", color="white", weight="bold", size=15)], alignment=ft.MainAxisAlignment.CENTER, spacing=8))
