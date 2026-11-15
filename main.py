@@ -10,7 +10,7 @@ BG_COLOR = "#121216"
 CARD_COLOR = "#1E1E26"
 
 def main(page: ft.Page):
-    page.title = "WB Автозаказ"
+    page.title = "WB.Track [by.Жекич]"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG_COLOR
     page.padding = 0
@@ -19,7 +19,7 @@ def main(page: ft.Page):
     server_badge = ft.Container(
         content=ft.Row([
             ft.Icon(ft.Icons.CIRCLE, size=10, color="#00E676"),
-            ft.Text("Сервер онлайн", size=12, color="white", weight="w500")
+            ft.Text("Онлайн", size=12, color="white", weight="w500")
         ], spacing=5),
         bgcolor="#2A1B3D",
         padding=ft.padding.symmetric(horizontal=10, vertical=5),
@@ -36,7 +36,7 @@ def main(page: ft.Page):
         border_radius=ft.border_radius.only(bottom_left=24, bottom_right=24),
         content=ft.Row([
             ft.Column([
-                ft.Text("WB Снайпер", size=24, weight="bold", color="white"),
+                ft.Text("WB.Track [by.Жекич]", size=21, weight="bold", color="white"),
                 ft.Text("Автомониторинг и выкуп", size=12, color="#E0E0E0")
             ], expand=True, spacing=2),
             server_badge,
@@ -93,11 +93,11 @@ def main(page: ft.Page):
 
     def update_badge(online: bool):
         if online:
-            server_badge.content.controls[0].color = "#00E676"
-            server_badge.content.controls[1].value = "Онлайн"
+            server_badge.content.controls.color = "#00E676"
+            server_badge.content.controls.value = "Онлайн"
         else:
-            server_badge.content.controls[0].color = "#FF5252"
-            server_badge.content.controls[1].value = "Офлайн"
+            server_badge.content.controls.color = "#FF5252"
+            server_badge.content.controls.value = "Офлайн"
 
     def load_list(e=None):
         tasks_column.controls.clear()
