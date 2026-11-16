@@ -124,8 +124,12 @@ def poll_telegram(state):
 # ----------------------------------------------------------------------- api
 
 def api_tasks():
+    headers = {}
+    token = os.environ.get("WORKER_TOKEN", "").strip()
+    if token:
+        headers["X-Worker-Token"] = token
     try:
-        r = requests.get(API_BASE + "/tasks", timeout=20)
+        r = requests.get(API_BASE + "/tasks", params={"all": "1"}, headers=headers, timeout=20)
         if r.status_code != 200:
             log("GET /tasks: HTTP %s" % r.status_code)
             return []
