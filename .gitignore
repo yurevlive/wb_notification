@@ -1,0 +1,18 @@
+# секреты
+.env
+*.env
+!.env.example
+
+# данные и сборка
+tasks.json
+users.json
+build/
+dist/
+*.apk
+*.aab
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
