@@ -10,7 +10,7 @@ NET_TIMEOUT = 8
 
 # Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
 # сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
 
 
@@ -172,7 +172,7 @@ def main(page: ft.Page):
             sbp, wal, tgt = it.get("current_sbp"), it.get("current_wallet"), it["target_price"]
             bt = "✅ Выкуплено" if it["bought"] >= it["limit"] else (f"Еще -{sbp - tgt} ₽" if sbp and sbp > tgt else ("🔥 Цель!" if sbp else "⏳ Обновите"))
             ps = f"СБП: {sbp} ₽ • Кош: {wal} ₽" if sbp else "Цена не загружена"
-            col.controls.append(ft.Container(bgcolor=CARD, padding=10, border_radius=14, content=ft.Row([ft.Image(src=it.get("image", ""), width=56, height=76, fit=ft.ImageFit.COVER), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=13, max_lines=2), ft.Text(f"Арт: {it['sku']} • {bt}", size=11, color="#E040FB"), ft.Text(ps, size=12, color="#00E676"), ft.Text(f"Цель: до {tgt} ₽ ({it['bought']}/{it['limit']})", size=11)], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_size=18, on_click=lambda _, s=it["sku"]: page.launch_url(WB + str(s) + S + "detail.aspx")), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color="#FF5252", icon_size=18, on_click=lambda _, s=it["sku"]: bg(delete, s))], spacing=0)])))
+            col.controls.append(ft.Container(bgcolor=CARD, padding=10, border_radius=14, content=ft.Row([ft.Image(src=it.get("image", ""), width=56, height=76, fit=ft.ImageFit.COVER), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=13, max_lines=2), ft.Text(f"Арт: {it['sku']} • {bt}", size=11, color="#E040FB"), ft.Text(ps, size=12, color="#00E676"), ft.Text(f"Цель: до {tgt} ₽ ({it['bought']}/{it['limit']})", size=11)], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, icon_color="#00E676", icon_size=18, tooltip="Выкупить", visible=it["bought"] < it["limit"], on_click=lambda _, t=it: buy(t)), ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_size=18, on_click=lambda _, s=it["sku"]: page.launch_url(WB + str(s) + S + "detail.aspx")), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color="#FF5252", icon_size=18, on_click=lambda _, s=it["sku"]: bg(delete, s))], spacing=0)])))
 
     def load(force=False):
         if st["busy"]:
@@ -227,6 +227,26 @@ def main(page: ft.Page):
     def delete(sku):
         try:
             requests.delete(API + S + "tasks" + S + str(sku), params={"user": st["user"]}, timeout=NET_TIMEOUT)
+        except (requests.RequestException, ValueError):
+            pass
+        st["busy"] = False
+        load()
+
+    def buy(task):
+        """Отметить покупку: bought+1. Остальные поля шлём как есть, иначе сервер
+        посчитает их пустыми и затрёт название/цены."""
+        if st["busy"]:
+            return
+        busy(True, "Отмечаю...")
+        bg(_buy_request, task, int(task.get("bought") or 0) + 1)
+
+    def _buy_request(task, bought):
+        payload = {"owner": st["user"], "sku": task["sku"], "bought": bought,
+                   "target_price": task["target_price"], "limit": task.get("limit") or 1,
+                   "name": task.get("name"), "image": task.get("image"),
+                   "current_sbp": task.get("current_sbp"), "current_wallet": task.get("current_wallet")}
+        try:
+            requests.post(API + S + "tasks", json=payload, timeout=NET_TIMEOUT)
         except (requests.RequestException, ValueError):
             pass
         st["busy"] = False
