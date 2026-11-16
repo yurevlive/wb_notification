@@ -1,18 +1,36 @@
+"""WB.Track — API на Flask для PythonAnywhere.
+
+Особенности площадки: исходящий интернет ограничен белым списком, поэтому
+wbbasket.ru с сервера недоступен. Значит сервер НЕ тянет товары сам, а
+принимает название и цены от клиента (приложение или воркер GitHub Actions).
+
+Совместимость: старый APK ходит без токена (?user=логин) — такой запрос
+обслуживается, но помечается как неаутентифицированный. Как только будет
+установлена сборка с токеном, можно включить REQUIRE_TOKEN=1.
+"""
+
+import hashlib
+import hmac
 import json
 import os
-import random
-import subprocess
+import secrets
 import threading
-import time
-import requests
+
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+DATA_FILE = os.environ.get("TASKS_FILE") or os.path.join(HERE, "tasks.json")
+USERS_FILE = os.environ.get("USERS_FILE") or os.path.join(HERE, "users.json")
+UI_FILE = os.path.join(HERE, "app_ui.py")
+REQUIRE_TOKEN = os.environ.get("REQUIRE_TOKEN", "").lower() in ("1", "true", "yes")
+
+PBKDF2_ITERATIONS = 200_000
+_lock = threading.Lock()
+
 
 def _load_dotenv(path=os.path.join(HERE, ".env")):
-    """Минимальный аналог python-dotenv: переменные окружения имеют приоритет."""
     if not os.path.exists(path):
         return
     try:
@@ -24,219 +42,238 @@ def _load_dotenv(path=os.path.join(HERE, ".env")):
                 key, val = line.split("=", 1)
                 os.environ.setdefault(key.strip(), val.strip().strip("\"'"))
     except OSError as e:
-        print(f"Не удалось прочитать .env: {e}")
+        print("Не удалось прочитать .env: %s" % e)
 
 
 _load_dotenv()
-DATA_FILE = os.environ.get("TASKS_FILE", "tasks.json")
-TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
-TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
-COEF_WALLET = 426 / 395
-COEF_SBP = 454 / 395
 
-wake_event = threading.Event()
-file_lock = threading.Lock()
 
-S = chr(47)
-P = "https:" + S + S
+# ------------------------------------------------------------------ хранилище
 
-def tg_url(method):
-    return P + "api." + "telegram.org" + S + "bot" + TG_TOKEN + S + method
-
-def wb_cdn_base(host, vol, part, sku):
-    return P + f"basket-{host}.wbbasket.ru" + S + f"vol{vol}" + S + f"part{part}" + S + str(sku)
-
-def wb_item_url(sku):
-    return P + "www.wildberries.ru" + S + "catalog" + S + str(sku) + S + "detail.aspx"
-
-def load_tasks():
-    with file_lock:
-        if not os.path.exists(DATA_FILE):
-            return []
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-
-def save_tasks(tasks):
-    with file_lock:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(tasks, f, ensure_ascii=False, indent=2)
-
-def get_basket_host(vol):
-    limits = (143, 287, 431, 719, 1007, 1061, 1115, 1169, 1313, 1601, 1655, 1919, 2045, 2189, 2405, 2621, 2837, 3053, 3269, 3485, 3701, 3917, 4133, 4349, 4565, 4877, 5189, 5501, 5813, 6125, 6437, 6749, 7061, 7373, 7685)
-    for i, lim in enumerate(limits, 1):
-        if vol <= lim:
-            return f"{i:02d}"
-    return "36"
-
-def get_wb_product(sku):
-    vol, part = sku // 100000, sku // 1000
-    host = get_basket_host(vol)
-    base_path = wb_cdn_base(host, vol, part, sku)
-    image_url = base_path + S + "images" + S + "c246x328" + S + "1.webp"
-    headers = {"User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36"}
+def load_json(path, default):
+    if not os.path.exists(path):
+        return default
     try:
-        r_card = requests.get(base_path + S + "info" + S + "ru" + S + "card.json", headers=headers, timeout=10)
-        name = r_card.json().get("imt_name", f"Товар {sku}") if r_card.status_code == 200 else f"Товар {sku}"
-        r_price = requests.get(base_path + S + "info" + S + "price-history.json", headers=headers, timeout=10)
-        if r_price.status_code == 200 and r_price.json():
-            base_rub = r_price.json()[-1].get("price", {}).get("RUB", 0) // 100
-            if base_rub > 0:
-                return name, round(base_rub * COEF_WALLET), round(base_rub * COEF_SBP), image_url
-    except Exception as e:
-        print(f"Ошибка данных {sku}: {e}")
-    return f"Товар {sku}", None, None, image_url
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
 
-def create_or_update_task(sku, target_price, limit=1):
-    name, price_wallet, price_sbp, image_url = get_wb_product(sku)
-    item = {"sku": sku, "target_price": target_price, "limit": limit, "bought": 0, "name": name, "image": image_url, "current_sbp": price_sbp, "current_wallet": price_wallet}
-    tasks = [t for t in load_tasks() if t["sku"] != sku]
-    tasks.append(item)
-    save_tasks(tasks)
-    wake_event.set()
-    return item
 
-def remove_task(sku):
-    tasks = load_tasks()
-    new_tasks = [t for t in tasks if t["sku"] != sku]
-    save_tasks(new_tasks)
-    return len(tasks) != len(new_tasks)
+def save_json(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+# -------------------------------------------------------------------- пароли
+
+def hash_pw(password, salt=None):
+    salt = salt or secrets.token_hex(8)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERATIONS)
+    return "pbkdf2$%d$%s$%s" % (PBKDF2_ITERATIONS, salt, digest.hex())
+
+
+def check_pw(stored, password):
+    if not stored:
+        return False
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, iterations, salt, expected = stored.split("$")
+            digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), int(iterations))
+            return hmac.compare_digest(digest.hex(), expected)
+        except (ValueError, TypeError):
+            return False
+    # старый формат: sha256 без соли
+    return hmac.compare_digest(stored, hashlib.sha256(password.encode("utf-8")).hexdigest())
+
+
+def new_token():
+    return secrets.token_urlsafe(24)
+
+
+# ------------------------------------------------------------- аутентификация
+
+def bearer_token():
+    header = request.headers.get("Authorization", "")
+    if header.lower().startswith("bearer "):
+        return header[7:].strip()
+    return ""
+
+
+def find_user_by_token(token):
+    if not token:
+        return None, None
+    users = load_json(USERS_FILE, {})
+    for login, user in users.items():
+        saved = user.get("token")
+        if saved and hmac.compare_digest(saved, token):
+            return login, user
+    return None, None
+
+
+def resolve_owner(payload_user="default"):
+    """Кто выполняет запрос: токен важнее поля owner/user в запросе."""
+    login, _ = find_user_by_token(bearer_token())
+    if login:
+        return login, True
+    if REQUIRE_TOKEN:
+        return None, False
+    return (payload_user or "default").strip().lower(), False
+
+
+def unauthorized():
+    return jsonify({"ok": False, "error": "Требуется авторизация"}), 401
+
+
+# --------------------------------------------------------------------- товары
+
+def normalize_task(item, previous=None):
+    task = {
+        "owner": item.get("owner") or (previous or {}).get("owner") or "default",
+        "sku": int(item["sku"]),
+        "target_price": int(item.get("target_price") or (previous or {}).get("target_price") or 0),
+        "limit": max(1, int(item.get("limit") or (previous or {}).get("limit") or 1)),
+        "bought": int((previous or {}).get("bought", 0)),
+        "name": item.get("name") or (previous or {}).get("name") or "Товар %s" % item["sku"],
+        "image": item.get("image") or (previous or {}).get("image") or "",
+        "current_sbp": item.get("current_sbp", (previous or {}).get("current_sbp")),
+        "current_wallet": item.get("current_wallet", (previous or {}).get("current_wallet")),
+    }
+    if "bought" in item:
+        task["bought"] = int(item["bought"])
+    return task
+
+
+# -------------------------------------------------------------------- маршруты
+
+@app.route("/", methods=["GET"])
+@app.route("/health", methods=["GET"])
+def index():
+    return jsonify({"status": "ok", "service": "WB.Track API"})
+
+
+@app.route("/get_ui", methods=["GET"])
+def get_ui():
+    """Оставлено для совместимости со старыми сборками."""
+    if not os.path.exists(UI_FILE):
+        return "", 404
+    with open(UI_FILE, "r", encoding="utf-8") as f:
+        return f.read(), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/register", methods=["POST"])
+def register():
+    data = request.json or {}
+    login = (data.get("login") or "").strip().lower()
+    password = (data.get("password") or "").strip()
+    tg_id = (data.get("tg_id") or "").strip()
+    if len(login) < 3 or len(password) < 4:
+        return jsonify({"ok": False, "error": "Логин от 3 символов, пароль от 4"}), 400
+    with _lock:
+        users = load_json(USERS_FILE, {})
+        if login in users:
+            return jsonify({"ok": False, "error": "Этот логин уже занят"}), 400
+        token = new_token()
+        users[login] = {"password": hash_pw(password), "tg_id": tg_id, "token": token}
+        save_json(USERS_FILE, users)
+    return jsonify({"ok": True, "login": login, "tg_id": tg_id, "token": token})
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.json or {}
+    login = (data.get("login") or "").strip().lower()
+    password = (data.get("password") or "").strip()
+    users = load_json(USERS_FILE, {})
+    user = users.get(login)
+    if not user or not check_pw(user.get("password", ""), password):
+        return jsonify({"ok": False, "error": "Неверный логин или пароль"}), 401
+
+    token = user.get("token") or new_token()
+    upgrade = not user.get("password", "").startswith("pbkdf2$") or user.get("token") != token
+    if upgrade:
+        with _lock:
+            users = load_json(USERS_FILE, {})
+            users[login] = dict(users.get(login) or user)
+            users[login]["password"] = hash_pw(password)  # миграция со старого sha256
+            users[login]["token"] = token
+            save_json(USERS_FILE, users)
+    return jsonify({"ok": True, "login": login, "tg_id": user.get("tg_id", ""), "token": token})
+
 
 @app.route("/tasks", methods=["GET"])
 def get_tasks():
-    return jsonify(load_tasks())
+    owner, _ = resolve_owner(request.args.get("user", "default"))
+    if owner is None:
+        return unauthorized()
+    tasks = load_json(DATA_FILE, [])
+    return jsonify([t for t in tasks if (t.get("owner") or "default") == owner])
+
 
 @app.route("/tasks", methods=["POST"])
 def add_task():
-    d = request.json
-    create_or_update_task(int(d["sku"]), int(d["target_price"]), int(d.get("limit", 1)))
-    return jsonify({"status": "ok"})
+    data = request.json or {}
+    try:
+        sku = int(data["sku"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Нужен sku"}), 400
+
+    owner, _ = resolve_owner(data.get("owner", "default"))
+    if owner is None:
+        return unauthorized()
+
+    with _lock:
+        tasks = load_json(DATA_FILE, [])
+        previous = next((t for t in tasks if (t.get("owner") or "default") == owner and int(t["sku"]) == sku), None)
+        task = normalize_task(dict(data, owner=owner, sku=sku), previous)
+        tasks = [t for t in tasks if not ((t.get("owner") or "default") == owner and int(t["sku"]) == sku)]
+        tasks.append(task)
+        save_json(DATA_FILE, tasks)
+    return jsonify({"ok": True, "task": task})
+
 
 @app.route("/tasks/<int:sku>", methods=["DELETE"])
 def delete_task(sku):
-    remove_task(sku)
-    return jsonify({"status": "deleted"})
-
-def send_tg(chat_id, text):
-    try:
-        requests.post(tg_url("sendMessage"), json={"chat_id": chat_id, "text": text}, timeout=10)
-    except Exception as e:
-        print(f"Ошибка TG: {e}")
-
-def open_in_yandex(sku):
-    subprocess.run(["am", "start", "-a", "android.intent.action.VIEW", "-d", wb_item_url(sku), "-p", "com.yandex.browser"], check=False)
-
-def parse_add_command(text):
-    """'АРТИКУЛ ЦЕНА [ЛИМИТ]' -> (sku, target, limit) или None."""
-    parts = text.replace(",", " ").split()
-    if len(parts) < 2:
-        return None
-    try:
-        sku = int(parts[0])
-        target = int(parts[1])
-        limit = int(parts[2]) if len(parts) >= 3 else 1
-    except ValueError:
-        return None
-    if sku <= 0 or target <= 0 or limit <= 0:
-        return None
-    return sku, target, min(limit, 99)
+    owner, _ = resolve_owner(request.args.get("user", "default"))
+    if owner is None:
+        return unauthorized()
+    with _lock:
+        tasks = load_json(DATA_FILE, [])
+        left = [t for t in tasks if not ((t.get("owner") or "default") == owner and int(t["sku"]) == sku)]
+        if len(left) == len(tasks):
+            return jsonify({"ok": False, "error": "Задача не найдена"}), 404
+        save_json(DATA_FILE, left)
+    return jsonify({"ok": True, "status": "deleted"})
 
 
-def handle_tg_text(chat_id, text):
-    if TG_CHAT_ID and str(chat_id) != TG_CHAT_ID:
-        send_tg(chat_id, "⛔ Доступ закрыт.")
-        return
-    if text.startswith(("/start", "/help")):
-        send_tg(chat_id, "🤖 WB.Track [by.Жекич]\nОтправьте: АРТИКУЛ ЦЕНА [ЛИМИТ]\nПример: 596432419 420\n\n/list — задачи\n/del АРТИКУЛ — удалить")
-        return
-    if text.startswith("/list"):
-        tasks = load_tasks()
-        if not tasks:
-            send_tg(chat_id, "📭 Список пуст.")
-            return
-        lines = ["📋 Текущие задачи:\n"]
-        for t in tasks:
-            st = "✅" if t["bought"] >= t["limit"] else "⏳"
-            cur = f"{t.get('current_sbp')} ₽" if t.get("current_sbp") else "—"
-            lines.append(f"{st} {t.get('name', t['sku'])} (Арт: {t['sku']})\nСейчас: {cur} | Цель: до {t['target_price']} ₽ ({t['bought']}/{t['limit']})")
-        send_tg(chat_id, "\n\n".join(lines))
-        return
-    if text.startswith("/del"):
-        parts = text.split()
-        if len(parts) < 2:
-            send_tg(chat_id, "⚠️ Формат: /del АРТИКУЛ")
-            return
-        try:
-            sku = int(parts[1])
-        except ValueError:
-            send_tg(chat_id, "⚠️ Формат: /del АРТИКУЛ")
-            return
-        ok = remove_task(sku)
-        send_tg(chat_id, f"🗑 Артикул {sku} удален." if ok else f"⚠️ Артикул {sku} не найден.")
-        return
+@app.route("/check_now", methods=["GET", "POST"])
+def check_now():
+    """Принудительная проверка. С PythonAnywhere WB недоступен — вернёт то, что было."""
+    from wb_common import fetch_product  # импорт внутри: без модуля сервер всё равно поднимется
 
-    parsed = parse_add_command(text)
-    if not parsed:
-        send_tg(chat_id, "⚠️ Формат: АРТИКУЛ ЦЕНА (например: 596432419 420)")
-        return
-    sku, target, limit = parsed
-    send_tg(chat_id, "⏳ Загружаю товар...")
-    item = create_or_update_task(sku, target, limit)
-    cur = f"{item['current_sbp']} ₽" if item["current_sbp"] else "—"
-    send_tg(chat_id, f"✅ Добавлено и синхронизировано!\n\n📦 {item['name']}\n🔢 Арт: {sku}\n💳 Сейчас (СБП): {cur}\n🎯 Цель: до {target} ₽ ({limit} шт.)")
+    owner, _ = resolve_owner(request.args.get("user", "default"))
+    if owner is None:
+        return unauthorized()
 
-def telegram_listener():
-    if not TG_TOKEN:
-        print("TG_TOKEN не задан — Telegram-бот выключен.")
-        return
-    print("Прием команд из Telegram запущен...")
-    offset = 0
-    while True:
-        try:
-            r = requests.get(tg_url("getUpdates"), params={"offset": offset, "timeout": 25}, timeout=30)
-            if r.status_code == 200:
-                for upd in r.json().get("result", []):
-                    offset = upd["update_id"] + 1
-                    msg = upd.get("message", {})
-                    if not (msg.get("text") and msg.get("chat")):
-                        continue
-                    try:
-                        handle_tg_text(str(msg["chat"]["id"]), msg["text"].strip())
-                    except Exception as e:
-                        print(f"Ошибка обработки команды: {e}")
-        except Exception as e:
-            print(f"Ошибка опроса TG: {e}")
-            time.sleep(5)
+    updated = 0
+    with _lock:
+        tasks = load_json(DATA_FILE, [])
+        for task in tasks:
+            if (task.get("owner") or "default") != owner:
+                continue
+            if int(task.get("bought") or 0) >= int(task.get("limit") or 1):
+                continue
+            name, wallet, sbp, image = fetch_product(int(task["sku"]), timeout=5)
+            if sbp is None:
+                continue
+            task["name"], task["current_wallet"], task["current_sbp"], task["image"] = name, wallet, sbp, image
+            updated += 1
+        if updated:
+            save_json(DATA_FILE, tasks)
+    return jsonify({"ok": True, "updated": updated})
 
-
-def worker():
-    print("Фоновый мониторинг WB запущен...")
-    while True:
-        wake_event.clear()
-        tasks = load_tasks()
-        changed = False
-        for t in tasks:
-            name, w_price, s_price, img = get_wb_product(t["sku"])
-            if name and t.get("name") != name:
-                t["name"], changed = name, True
-            if img and t.get("image") != img:
-                t["image"], changed = img, True
-            if s_price is not None:
-                if t.get("current_sbp") != s_price or t.get("current_wallet") != w_price:
-                    t["current_sbp"], t["current_wallet"], changed = s_price, w_price, True
-                print(f"Проверка [{t['sku']}] {name}: СБП {s_price} ₽ | Кошелек {w_price} ₽ (цель <= {t['target_price']} ₽)")
-                if t["bought"] < t["limit"] and s_price <= t["target_price"]:
-                    send_tg(TG_CHAT_ID, f"🔔 Цена WB упала!\n{name} (Арт: {t['sku']})\n💳 СБП: {s_price} ₽ | 👛 Кошелек: {w_price} ₽\nОткрываю Яндекс.Браузер...")
-                    open_in_yandex(t["sku"])
-                    t["bought"] += 1
-                    changed = True
-        if changed:
-            save_tasks(tasks)
-        wake_event.wait(random.randint(45, 75))
 
 if __name__ == "__main__":
-    threading.Thread(target=worker, daemon=True).start()
-    threading.Thread(target=telegram_listener, daemon=True).start()
     app.run(host="127.0.0.1", port=8000)
