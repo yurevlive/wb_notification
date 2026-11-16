@@ -203,6 +203,12 @@ def main(page: ft.Page):
                 code_in.visible = True
                 verify_btn.visible = True
                 send_btn.content = ft.Text("Отправить код повторно", color="white", weight="bold")
+                if data.get("sent") is False:
+                    a_err.value = "Код не отправлен: " + (data.get("send_error") or "ошибка")
+                    a_err.color = DANGER
+                else:
+                    a_err.value = "Код отправлен. Проверьте Telegram."
+                    a_err.color = OK
             else:
                 err = data.get("error", "Ошибка")
         except (requests.RequestException, ValueError):

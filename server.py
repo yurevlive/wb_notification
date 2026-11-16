@@ -108,20 +108,14 @@ def check_pw(stored, password):
 
 def send_tg(chat_id, text):
     if not TG_TOKEN:
-        sys.stderr.write("TG_TOKEN is empty, cannot send\\n")
-        sys.stderr.flush()
-        return
+        return {"ok": False, "error": "TG_TOKEN empty on server"}
     try:
         r = requests.post(tg_url("sendMessage"), json={"chat_id": chat_id, "text": text}, timeout=10)
         if r.status_code != 200:
-            sys.stderr.write("TG send fail: %s %s\\n" % (r.status_code, r.text[:200]))
-            sys.stderr.flush()
-        else:
-            sys.stderr.write("TG send ok to %s\\n" % (chat_id,))
-            sys.stderr.flush()
+            return {"ok": False, "error": "HTTP %s: %s" % (r.status_code, r.text[:200])}
+        return {"ok": True}
     except Exception as e:
-        sys.stderr.write("TG send error: %r\\n" % (e,))
-        sys.stderr.flush()
+        return {"ok": False, "error": repr(e)}
 
 
 def new_token():
@@ -282,8 +276,11 @@ def request_code():
         codes = load_json(CODES_FILE, {})
         codes[key] = {"code": code, "expires": now + CODE_TTL}
         save_json(CODES_FILE, codes)
-    send_tg(chat, "Код входа в WB.Track: %s (действует 5 минут)" % code)
-    return jsonify({"ok": True})
+    result = send_tg(chat, "Код входа в WB.Track: %s (действует 5 минут)" % code)
+    if not result.get("ok"):
+        sys.stderr.write("request_code send failed: %s\\n" % (result.get("error"),))
+        sys.stderr.flush()
+    return jsonify({"ok": True, "sent": result.get("ok", False), "send_error": result.get("error")})
 
 
 @app.route("/verify_code", methods=["POST"])
