@@ -1,30 +1,63 @@
-name: Build APK
+name: Build Android APK
 on:
+  workflow_dispatch:
   push:
     branches: [ main, master ]
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.24.0'
           channel: 'stable'
-      - name: Install Flet
-        run: pip install flet requests
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Flet and Pillow
+        run: pip install flet==0.25.2 pillow
+
+      - name: Generate App Icon
+        run: |
+          mkdir -p assets
+          cat << 'EOF' > make_icon.py
+          from PIL import Image, ImageDraw
+          img = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+          d = ImageDraw.Draw(img)
+          # Темно-фиолетовый скругленный фон
+          d.rounded_rectangle((0, 0, 1024, 1024), radius=230, fill="#1E142B")
+          # Неоновое кольцо прицела
+          d.ellipse((222, 222, 802, 802), outline="#D946EF", width=36)
+          # 4 засечки прицела
+          d.rounded_rectangle((494, 150, 530, 240), radius=18, fill="#D946EF")
+          d.rounded_rectangle((494, 784, 530, 874), radius=18, fill="#7C3AED")
+          d.rounded_rectangle((150, 494, 240, 530), radius=18, fill="#D946EF")
+          d.rounded_rectangle((784, 494, 874, 530), radius=18, fill="#7C3AED")
+          # Белая стрелка снижения цены по центру
+          d.line((512, 350, 512, 650), fill="#FFFFFF", width=52)
+          d.line((390, 530, 512, 650), fill="#FFFFFF", width=52)
+          d.line((634, 530, 512, 650), fill="#FFFFFF", width=52)
+          img.save("assets/icon.png")
+          EOF
+          python make_icon.py
+          rm make_icon.py
+
       - name: Build APK
-        run: flet build apk
+        run: flet build apk --project "wb-track" --product "WB.Track [by.Жекич]"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
