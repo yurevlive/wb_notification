@@ -101,9 +101,11 @@ def check_pw(stored, password):
 
 def send_tg(chat_id, text):
     try:
-        requests.post(tg_url("sendMessage"), json={"chat_id": chat_id, "text": text}, timeout=10)
-    except Exception:
-        pass
+        r = requests.post(tg_url("sendMessage"), json={"chat_id": chat_id, "text": text}, timeout=10)
+        if r.status_code != 200:
+            print("TG send fail:", r.status_code, r.text[:200], flush=True)
+    except Exception as e:
+        print("TG send error:", repr(e), flush=True)
 
 
 def new_token():
@@ -262,7 +264,7 @@ def request_code():
         codes = load_json(CODES_FILE, {})
         codes[key] = {"code": code, "expires": now + CODE_TTL}
         save_json(CODES_FILE, codes)
-    send_tg(chat, "Код входа в WB.Track: %s (действует 5 минут)" % code)
+    threading.Thread(target=send_tg, args=(chat, "Код входа в WB.Track: %s (действует 5 минут)" % code), daemon=True).start()
     return jsonify({"ok": True})
 
 
