@@ -14,6 +14,7 @@ import hmac
 import json
 import os
 import random
+import requests
 import secrets
 import sys
 import threading
@@ -28,6 +29,11 @@ DATA_FILE = os.environ.get("TASKS_FILE") or os.path.join(HERE, "tasks.json")
 USERS_FILE = os.environ.get("USERS_FILE") or os.path.join(HERE, "users.json")
 CODES_FILE = os.environ.get("CODES_FILE") or os.path.join(HERE, "codes.json")
 CODE_TTL = 300
+TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
+S = "/"
+
+def tg_url(method):
+    return "https://api.telegram.org/bot%s/%s" % (TG_TOKEN, method)
 UI_FILE = os.path.join(HERE, "app_ui.py")
 REQUIRE_TOKEN = os.environ.get("REQUIRE_TOKEN", "").lower() in ("1", "true", "yes")
 
@@ -101,10 +107,17 @@ def check_pw(stored, password):
 
 
 def send_tg(chat_id, text):
+    if not TG_TOKEN:
+        sys.stderr.write("TG_TOKEN is empty, cannot send\\n")
+        sys.stderr.flush()
+        return
     try:
         r = requests.post(tg_url("sendMessage"), json={"chat_id": chat_id, "text": text}, timeout=10)
         if r.status_code != 200:
             sys.stderr.write("TG send fail: %s %s\\n" % (r.status_code, r.text[:200]))
+            sys.stderr.flush()
+        else:
+            sys.stderr.write("TG send ok to %s\\n" % (chat_id,))
             sys.stderr.flush()
     except Exception as e:
         sys.stderr.write("TG send error: %r\\n" % (e,))
@@ -269,7 +282,7 @@ def request_code():
         codes = load_json(CODES_FILE, {})
         codes[key] = {"code": code, "expires": now + CODE_TTL}
         save_json(CODES_FILE, codes)
-    threading.Thread(target=send_tg, args=(chat, "Код входа в WB.Track: %s (действует 5 минут)" % code), daemon=True).start()
+    send_tg(chat, "Код входа в WB.Track: %s (действует 5 минут)" % code)
     return jsonify({"ok": True})
 
 
