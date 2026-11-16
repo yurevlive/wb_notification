@@ -205,6 +205,11 @@ def login():
 
 @app.route("/tasks", methods=["GET"])
 def get_tasks():
+    if request.args.get("all") in ("1", "true"):
+        expected = os.environ.get("WORKER_TOKEN", "").strip()
+        if expected and not hmac.compare_digest(expected, request.headers.get("X-Worker-Token", "")):
+            return unauthorized()
+        return jsonify(load_json(DATA_FILE, []))
     owner, _ = resolve_owner(request.args.get("user", "default"))
     if owner is None:
         return unauthorized()
