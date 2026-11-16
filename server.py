@@ -15,6 +15,7 @@ import json
 import os
 import random
 import secrets
+import sys
 import threading
 import time
 
@@ -103,9 +104,11 @@ def send_tg(chat_id, text):
     try:
         r = requests.post(tg_url("sendMessage"), json={"chat_id": chat_id, "text": text}, timeout=10)
         if r.status_code != 200:
-            print("TG send fail:", r.status_code, r.text[:200], flush=True)
+            sys.stderr.write("TG send fail: %s %s\\n" % (r.status_code, r.text[:200]))
+            sys.stderr.flush()
     except Exception as e:
-        print("TG send error:", repr(e), flush=True)
+        sys.stderr.write("TG send error: %r\\n" % (e,))
+        sys.stderr.flush()
 
 
 def new_token():
@@ -249,6 +252,8 @@ def change_password():
 @app.route("/request_code", methods=["POST"])
 def request_code():
     data = request.json or {}
+    sys.stderr.write("request_code called: %r\\n" % (data,))
+    sys.stderr.flush()
     raw = (data.get("tg_id") or "").strip()
     if raw.startswith("@"):
         chat, key = raw, raw[1:]
