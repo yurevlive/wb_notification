@@ -30,7 +30,9 @@ def fetch_wb(sku):
 def main(page: ft.Page):
     page.title = "WB.Track [by.Жекич]"
     page.theme_mode = ft.ThemeMode.DARK
-    page.bgcolor, page.padding = BG, 0
+    page.bgcolor = BG
+    page.padding = 0
+    page.scroll = ft.ScrollMode.ADAPTIVE
     page.locale_configuration = ft.LocaleConfiguration(supported_locales=[ft.Locale("ru", "RU")], current_locale=ft.Locale("ru", "RU"))
     st = {"tasks": [], "user": "", "reg": False, "q": ""}
 
@@ -82,8 +84,8 @@ def main(page: ft.Page):
     stats = ft.Row([ft.Container(expand=True, bgcolor=CARD, padding=10, border_radius=12, content=ft.Column([s1, ft.Text("Всего", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER)), ft.Container(expand=True, bgcolor=CARD, padding=10, border_radius=12, content=ft.Column([s2, ft.Text("В поиске", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER)), ft.Container(expand=True, bgcolor=CARD, padding=10, border_radius=12, content=ft.Column([s3, ft.Text("Выкуплено", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER))], spacing=8)
 
     sku_in = ft.TextField(hint_text="Артикул WB", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD)
-    pr_in = ft.TextField(hint_text="Цена до (₽)", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, expand=True)
-    lim_in = ft.TextField(value="1", prefix_text="Шт: ", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, width=120)
+    pr_in = ft.TextField(hint_text="Цена до (₽)", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, width=170)
+    lim_in = ft.TextField(value="1", prefix_text="Шт: ", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, width=130)
     srch = ft.TextField(hint_text="Поиск...", prefix_icon=ft.Icons.SEARCH_ROUNDED, border_radius=12, filled=True, bgcolor=CARD, height=42, on_change=lambda e: (st.update({"q": srch.value.lower()}), render(), page.update()))
     col = ft.Column(spacing=10)
 
@@ -123,7 +125,7 @@ def main(page: ft.Page):
         requests.delete(API + S + "tasks" + S + str(sku), params={"user": st["user"]}, timeout=10)
         load()
 
-    main_b = ft.Column(visible=False, expand=True, scroll="auto", controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in]), ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, width=340, on_click=add), srch, col], spacing=10))])
+    main_b = ft.Column(visible=False, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in], spacing=10), ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, width=310, on_click=add), srch, col], spacing=10))])
     page.add(auth_view, main_b)
     saved = page.client_storage.get("wb_u") or ""
     if saved: enter(saved)
