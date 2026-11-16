@@ -25,7 +25,7 @@ import requests
 
 from wb_common import fetch_product, parse_add_command, product_url
 
-API_BASE = os.environ.get("WB_API_BASE", "https://yurevlive.pythonanywhere.com").rstrip("/")
+API_BASE = os.environ.get("WB_API_BASE", "").strip().rstrip("/") or "https://yurevlive.pythonanywhere.com"
 TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 STATE_FILE = os.environ.get("STATE_FILE", "state.json")
