@@ -29,7 +29,6 @@ DATA_FILE = os.environ.get("TASKS_FILE") or os.path.join(HERE, "tasks.json")
 USERS_FILE = os.environ.get("USERS_FILE") or os.path.join(HERE, "users.json")
 CODES_FILE = os.environ.get("CODES_FILE") or os.path.join(HERE, "codes.json")
 CODE_TTL = 300
-TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
 S = "/"
 
 def tg_url(method):
@@ -63,6 +62,7 @@ def _load_dotenv(path=os.path.join(HERE, ".env")):
 _load_dotenv()
 
 REQUIRE_TOKEN = os.environ.get("REQUIRE_TOKEN", "").lower() in ("1", "true", "yes")
+TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
 
 
 # ------------------------------------------------------------------ хранилище
@@ -180,17 +180,7 @@ def normalize_task(item, previous=None):
 @app.route("/", methods=["GET"])
 @app.route("/health", methods=["GET"])
 def index():
-    _keys = []
-    _p = os.path.join(HERE, ".env")
-    if os.path.exists(_p):
-        try:
-            for line in open(_p, encoding="utf-8"):
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    _keys.append(line.split("=", 1)[0].strip())
-        except OSError:
-            pass
-    return jsonify({"status": "ok", "service": "WB.Track API", "require_token": REQUIRE_TOKEN, "tg_token_set": bool(TG_TOKEN), "tg_token_len": len(TG_TOKEN), "dotenv_exists": os.path.exists(_p), "dotenv_keys": _keys, "env_tg_token_len": len(os.environ.get("TG_TOKEN", ""))})
+    return jsonify({"status": "ok", "service": "WB.Track API", "require_token": REQUIRE_TOKEN, "tg_token_set": bool(TG_TOKEN)})
 
 
 @app.route("/get_ui", methods=["GET"])
