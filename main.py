@@ -10,7 +10,7 @@ NET_TIMEOUT = 8
 
 # Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
 # сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
 
 
@@ -55,7 +55,7 @@ def main(page: ft.Page):
     page.padding = 0
     page.scroll = ft.ScrollMode.AUTO
     page.locale_configuration = ft.LocaleConfiguration(supported_locales=[ft.Locale("ru", "RU")], current_locale=ft.Locale("ru", "RU"))
-    st = {"tasks": [], "user": "", "reg": False, "q": "", "busy": False}
+    st = {"tasks": [], "user": "", "token": "", "reg": False, "q": "", "busy": False}
 
     def bg(fn, *args):
         """Сеть — только в фоне, иначе UI замирает чёрным экраном."""
@@ -88,11 +88,15 @@ def main(page: ft.Page):
         tg_in.visible, a_err.value = st["reg"], ""
         page.update()
 
-    def enter(u):
+    def enter(u, token=""):
         st["user"] = u
+        st["token"] = token or ""
         u_lbl.value = f"Кабинет: {u}"
         auth_view.visible, main_b.visible = False, True
         page.update()
+
+    def auth_headers():
+        return {"Authorization": "Bearer " + st["token"]} if st.get("token") else {}
 
     def auth(e):
         u, p = u_in.value.strip().lower(), p_in.value.strip()
@@ -107,7 +111,7 @@ def main(page: ft.Page):
         bg(_auth_request, u, p)
 
     def _auth_request(u, p):
-        err, login = "", None
+        err, login, token = "", None, ""
         try:
             r = requests.post(API + S + ("register" if st["reg"] else "login"),
                               json={"login": u, "password": p, "tg_id": tg_in.value.strip()},
@@ -115,8 +119,17 @@ def main(page: ft.Page):
             data = r.json()
             if data.get("ok"):
                 login = data.get("login") or u
+                token = data.get("token") or ""
                 if rem.value:
                     page.client_storage.set("wb_u", login)
+                    if token:
+                        page.client_storage.set("wb_token", token)
+                else:
+                    try:
+                        page.client_storage.remove("wb_u")
+                        page.client_storage.remove("wb_token")
+                    except Exception:
+                        pass
             else:
                 err = data.get("error", "Ошибка входа")
         except (requests.RequestException, ValueError):
@@ -124,7 +137,7 @@ def main(page: ft.Page):
         auth_btn.disabled = False
         b_txt.value = "Создать аккаунт" if st["reg"] else "Войти"
         if login:
-            enter(login)
+            enter(login, token)
             load()
         else:
             a_err.value = err
@@ -132,8 +145,10 @@ def main(page: ft.Page):
 
     def logout(e):
         st["user"] = ""
+        st["token"] = ""
         try:
             page.client_storage.remove("wb_u")
+            page.client_storage.remove("wb_token")
         except Exception:
             pass
         main_b.visible, auth_view.visible = False, True
@@ -182,7 +197,10 @@ def main(page: ft.Page):
 
     def _load_request(force=False):
         try:
-            r = requests.get(API + S + "tasks", params={"user": st["user"]}, timeout=NET_TIMEOUT)
+            r = requests.get(API + S + "tasks", params={"user": st["user"]}, headers=auth_headers(), timeout=NET_TIMEOUT)
+            if r.status_code == 401:
+                logout(None)
+                return
             if r.status_code != 200:
                 dot.color, st_lbl.value = "#FF5252", "Офлайн"
                 page.update()
@@ -218,7 +236,7 @@ def main(page: ft.Page):
     def _add_request(sku, tgt, lim):
         try:
             n, w, s, img = fetch_wb(sku)
-            requests.post(API + S + "tasks", json={"owner": st["user"], "sku": sku, "target_price": tgt, "limit": lim, "name": n, "image": img, "current_sbp": s, "current_wallet": w}, timeout=NET_TIMEOUT)
+            requests.post(API + S + "tasks", json={"owner": st["user"], "sku": sku, "target_price": tgt, "limit": lim, "name": n, "image": img, "current_sbp": s, "current_wallet": w}, headers=auth_headers(), timeout=NET_TIMEOUT)
         except (requests.RequestException, ValueError):
             pass
         st["busy"] = False
@@ -226,7 +244,7 @@ def main(page: ft.Page):
 
     def delete(sku):
         try:
-            requests.delete(API + S + "tasks" + S + str(sku), params={"user": st["user"]}, timeout=NET_TIMEOUT)
+            requests.delete(API + S + "tasks" + S + str(sku), params={"user": st["user"]}, headers=auth_headers(), timeout=NET_TIMEOUT)
         except (requests.RequestException, ValueError):
             pass
         st["busy"] = False
@@ -246,7 +264,7 @@ def main(page: ft.Page):
                    "name": task.get("name"), "image": task.get("image"),
                    "current_sbp": task.get("current_sbp"), "current_wallet": task.get("current_wallet")}
         try:
-            requests.post(API + S + "tasks", json=payload, timeout=NET_TIMEOUT)
+            requests.post(API + S + "tasks", json=payload, headers=auth_headers(), timeout=NET_TIMEOUT)
         except (requests.RequestException, ValueError):
             pass
         st["busy"] = False
@@ -284,8 +302,9 @@ def main(page: ft.Page):
     # первый экран уже нарисован — только теперь идём в сеть
     bg(check_update)
     saved = page.client_storage.get("wb_u") or ""
+    saved_token = page.client_storage.get("wb_token") or ""
     if saved:
-        enter(saved)
+        enter(saved, saved_token)
         load()
 
 
