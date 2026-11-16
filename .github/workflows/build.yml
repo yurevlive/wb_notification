@@ -98,7 +98,7 @@ jobs:
           ARGS=(--project "wb-track" --product "WB.Track [by.Жекич]"
                 --build-version "$VER" --build-number "$GITHUB_RUN_NUMBER")
           if [ "$SIGNED" = "1" ]; then
-            ARGS+=(--android-signing-key-store upload.jks
+            ARGS+=(--android-signing-key-store "$GITHUB_WORKSPACE/upload.jks"
                    --android-signing-key-store-password "$STORE_PASS"
                    --android-signing-key-alias "${KEY_ALIAS:-upload}"
                    --android-signing-key-password "${KEY_PASS:-$STORE_PASS}")
