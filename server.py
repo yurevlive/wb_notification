@@ -40,7 +40,11 @@ def _load_dotenv(path=os.path.join(HERE, ".env")):
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 key, val = line.split("=", 1)
-                os.environ.setdefault(key.strip(), val.strip().strip("\"'"))
+                key, val = key.strip(), val.strip().strip("\"'")
+                if not key:
+                    continue
+                if os.environ.get(key, "").strip() == "":
+                    os.environ[key] = val
     except OSError as e:
         print("Не удалось прочитать .env: %s" % e)
 
@@ -151,7 +155,7 @@ def normalize_task(item, previous=None):
 @app.route("/", methods=["GET"])
 @app.route("/health", methods=["GET"])
 def index():
-    return jsonify({"status": "ok", "service": "WB.Track API"})
+    return jsonify({"status": "ok", "service": "WB.Track API", "require_token": REQUIRE_TOKEN})
 
 
 @app.route("/get_ui", methods=["GET"])
