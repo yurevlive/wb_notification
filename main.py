@@ -9,7 +9,7 @@ NET_TIMEOUT = 8
 
 # Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
 # сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
 
 
@@ -62,8 +62,6 @@ def fetch_wb(sku):
 
 def main(page: ft.Page):
     page.title = "WB.Track [by.Жекич]"
-    page.theme_mode = ft.ThemeMode.DARK
-    page.bgcolor = BG
     page.padding = 0
     page.scroll = ft.ScrollMode.AUTO
     page.locale_configuration = ft.LocaleConfiguration(supported_locales=[ft.Locale("ru", "RU")], current_locale=ft.Locale("ru", "RU"))
@@ -78,7 +76,8 @@ def main(page: ft.Page):
         OK, WARN, DANGER = "#22C55E", "#F59E0B", "#EF4444"
         page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG
-    st = {"tasks": [], "user": "", "token": "", "reg": False, "q": "", "busy": False, "alerted_shown": False}
+    page.bgcolor = BG
+    st = {"tasks": [], "user": "", "token": "", "reg": False, "tg_mode": False, "q": "", "busy": False, "alerted_shown": False}
 
     def bg(fn, *args):
         """Сеть — только в фоне, иначе UI замирает чёрным экраном."""
@@ -99,6 +98,12 @@ def main(page: ft.Page):
     p_in = ft.TextField(hint_text="Пароль", password=True, can_reveal_password=True, border_radius=12, filled=True, bgcolor=CARD)
     tg_in = ft.TextField(hint_text="Числовой Telegram ID", border_radius=12, filled=True, bgcolor=CARD, visible=False)
     rem = ft.Checkbox(label="Запомнить меня", value=True, active_color=P1)
+    # --- Telegram-вход ---
+    tg_id_in = ft.TextField(hint_text="Ваш Telegram (@username или ID)", border_radius=12, filled=True, bgcolor=CARD)
+    code_in = ft.TextField(hint_text="Код из Telegram", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, visible=False)
+    send_btn = ft.ElevatedButton(content=ft.Text("Отправить код", color="white", weight="bold"), bgcolor=P1, height=46)
+    verify_btn = ft.ElevatedButton(content=ft.Text("Войти по коду", color="white", weight="bold"), bgcolor=P1, height=46, visible=False)
+    mode_txt = ft.Text("Обычный вход", size=13, color=P1)
     a_err = ft.Text("", size=13, color="#FF5252")
     b_txt = ft.Text("Войти", color="white", weight="bold")
     sw_txt = ft.Text("Нет аккаунта? Регистрация", size=13, color="#E040FB")
@@ -177,8 +182,91 @@ def main(page: ft.Page):
         main_b.visible, auth_view.visible = False, True
         page.update()
 
+    def request_code(e):
+        tid = tg_id_in.value.strip()
+        if not tid:
+            a_err.value = "Введите логин или ID Telegram"
+            page.update()
+            return
+        a_err.value = ""
+        send_btn.disabled = True
+        send_btn.content = ft.Text("Отправляю...", color="white", weight="bold")
+        page.update()
+        bg(_request_code, tid)
+
+    def _request_code(tid):
+        err = ""
+        try:
+            r = requests.post(API + S + "request_code", json={"tg_id": tid}, timeout=NET_TIMEOUT)
+            data = r.json()
+            if data.get("ok"):
+                code_in.visible = True
+                verify_btn.visible = True
+                send_btn.content = ft.Text("Отправить код повторно", color="white", weight="bold")
+            else:
+                err = data.get("error", "Ошибка")
+        except (requests.RequestException, ValueError):
+            err = "Сервер недоступен"
+        send_btn.disabled = False
+        if err:
+            a_err.value = err
+        page.update()
+
+    def verify_code(e):
+        tid = tg_id_in.value.strip()
+        code = code_in.value.strip()
+        if not tid or not code:
+            a_err.value = "Введите ID и код"
+            page.update()
+            return
+        a_err.value = ""
+        verify_btn.disabled = True
+        verify_btn.content = ft.Text("Проверяю...", color="white", weight="bold")
+        page.update()
+        bg(_verify_code, tid, code)
+
+    def _verify_code(tid, code):
+        login, token, err = None, None, ""
+        try:
+            r = requests.post(API + S + "verify_code", json={"tg_id": tid, "code": code}, timeout=NET_TIMEOUT)
+            data = r.json()
+            if data.get("ok"):
+                login = data.get("login") or ("tg_" + tid)
+                token = data.get("token") or ""
+                if rem.value:
+                    page.client_storage.set("wb_u", login)
+                    if token:
+                        page.client_storage.set("wb_token", token)
+            else:
+                err = data.get("error", "Неверный код")
+        except (requests.RequestException, ValueError):
+            err = "Сервер недоступен"
+        verify_btn.disabled = False
+        verify_btn.content = ft.Text("Войти по коду", color="white", weight="bold")
+        if login:
+            enter(login, token)
+            load()
+        else:
+            a_err.value = err
+            page.update()
+
+    def toggle_mode(e):
+        st["tg_mode"] = not st["tg_mode"]
+        regular_box.visible = not st["tg_mode"]
+        tg_box.visible = st["tg_mode"]
+        mode_txt.value = "Войти через Telegram" if not st["tg_mode"] else "Обычный вход"
+        a_err.value = ""
+        page.update()
+
+    send_btn.on_click = request_code
+    verify_btn.on_click = verify_code
+    mode_txt.on_click = toggle_mode
+
     auth_btn = ft.ElevatedButton(content=b_txt, bgcolor=P1, height=46, on_click=auth)
-    auth_view = ft.Container(padding=20, bgcolor=BG, expand=True, content=ft.Column([ft.Container(height=20), ft.Container(width=72, height=72, border_radius=20, gradient=ft.LinearGradient(colors=[P2, P1]), content=ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=40, color="white"), alignment=ft.alignment.center), ft.Text("WB.Track", size=24, weight="bold", color="white"), a_t, u_in, p_in, tg_in, rem, a_err, ft.Container(content=auth_btn, expand=True), ft.TextButton(content=sw_txt, on_click=toggle)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
+
+    regular_box = ft.Container(content=ft.Column([a_t, u_in, p_in, tg_in, rem, a_err, ft.Container(content=auth_btn, expand=True)], spacing=10), visible=True)
+    tg_box = ft.Container(content=ft.Column([ft.Text("Вход через Telegram", size=16, weight="bold"), tg_id_in, send_btn, code_in, verify_btn, a_err], spacing=10), visible=False)
+    auth_view = ft.Container(padding=20, bgcolor=BG, expand=True, content=ft.Column([ft.Container(height=20), ft.Container(width=72, height=72, border_radius=20, gradient=ft.LinearGradient(colors=[P2, P1]), content=ft.Icon(ft.Icons.TELEGRAM, size=40, color="white"), alignment=ft.alignment.center), ft.Text("WB.Track", size=24, weight="bold", color="white"), regular_box, tg_box, ft.TextButton(content=mode_txt, on_click=toggle_mode)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
 
     # ---------- шапка ----------
     u_lbl = ft.Text("Кабинет", size=12, color="#E0E0E0")

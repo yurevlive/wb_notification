@@ -13,8 +13,10 @@ import hashlib
 import hmac
 import json
 import os
+import random
 import secrets
 import threading
+import time
 
 from flask import Flask, request, jsonify
 
@@ -23,6 +25,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 DATA_FILE = os.environ.get("TASKS_FILE") or os.path.join(HERE, "tasks.json")
 USERS_FILE = os.environ.get("USERS_FILE") or os.path.join(HERE, "users.json")
+CODES_FILE = os.environ.get("CODES_FILE") or os.path.join(HERE, "codes.json")
+CODE_TTL = 300
 UI_FILE = os.path.join(HERE, "app_ui.py")
 REQUIRE_TOKEN = os.environ.get("REQUIRE_TOKEN", "").lower() in ("1", "true", "yes")
 
@@ -93,6 +97,13 @@ def check_pw(stored, password):
             return False
     # старый формат: sha256 без соли
     return hmac.compare_digest(stored, hashlib.sha256(password.encode("utf-8")).hexdigest())
+
+
+def send_tg(chat_id, text):
+    try:
+        requests.post(tg_url("sendMessage"), json={"chat_id": chat_id, "text": text}, timeout=10)
+    except Exception:
+        pass
 
 
 def new_token():
@@ -231,6 +242,61 @@ def change_password():
         users[login]["password"] = hash_pw(new_pw)
         save_json(USERS_FILE, users)
     return jsonify({"ok": True})
+
+
+@app.route("/request_code", methods=["POST"])
+def request_code():
+    data = request.json or {}
+    raw = (data.get("tg_id") or "").strip()
+    if raw.startswith("@"):
+        chat, key = raw, raw[1:]
+    elif raw.isdigit():
+        chat, key = raw, raw
+    else:
+        chat, key = "@" + raw, raw
+    if not key:
+        return jsonify({"ok": False, "error": "Введите логин или ID Telegram"}), 400
+    code = "%06d" % random.randrange(1000000)
+    now = int(time.time())
+    with _lock:
+        codes = load_json(CODES_FILE, {})
+        codes[key] = {"code": code, "expires": now + CODE_TTL}
+        save_json(CODES_FILE, codes)
+    send_tg(chat, "Код входа в WB.Track: %s (действует 5 минут)" % code)
+    return jsonify({"ok": True})
+
+
+@app.route("/verify_code", methods=["POST"])
+def verify_code():
+    data = request.json or {}
+    raw = (data.get("tg_id") or "").strip()
+    if raw.startswith("@"):
+        key = raw[1:]
+    elif raw.isdigit():
+        key = raw
+    else:
+        key = raw
+    code = (data.get("code") or "").strip()
+    now = int(time.time())
+    with _lock:
+        codes = load_json(CODES_FILE, {})
+        entry = codes.get(key)
+        if not entry or entry.get("code") != code or int(entry.get("expires", 0)) < now:
+            return jsonify({"ok": False, "error": "Неверный или просроченный код"}), 401
+        del codes[key]
+        save_json(CODES_FILE, codes)
+    login = "tg_" + key
+    with _lock:
+        users = load_json(USERS_FILE, {})
+        if login not in users:
+            users[login] = {"password": hash_pw(secrets.token_hex(16)), "tg_id": key, "token": new_token()}
+        else:
+            if not users[login].get("token"):
+                users[login]["token"] = new_token()
+            users[login]["tg_id"] = key
+        save_json(USERS_FILE, users)
+        token = users[login]["token"]
+    return jsonify({"ok": True, "login": login, "tg_id": key, "token": token})
 
 
 @app.route("/tasks", methods=["GET"])
