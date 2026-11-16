@@ -1,4 +1,3 @@
-import threading
 import flet as ft
 import requests
 
@@ -32,7 +31,6 @@ def main(page: ft.Page):
     page.title = "WB.Track [by.Жекич]"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor, page.padding = BG, 0
-    page.locale_configuration = ft.LocaleConfiguration(supported_locales=[ft.Locale("ru", "RU")], current_locale=ft.Locale("ru", "RU"))
     st = {"tasks": [], "user": "", "reg": False, "q": ""}
 
     a_t = ft.Text("Вход в кабинет", size=24, weight="bold")
@@ -52,16 +50,10 @@ def main(page: ft.Page):
         tg_in.visible, a_err.value = st["reg"], ""
         page.update()
 
-    def show_auth():
-        page.controls.clear()
-        page.add(ft.Container(padding=24, content=ft.Column([ft.Container(height=20), ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=64, color=P1), a_t, u_in, p_in, tg_in, rem, a_err, ft.ElevatedButton(content=b_txt, bgcolor=P1, height=48, width=320, on_click=auth), ft.TextButton(content=sw_txt, on_click=toggle)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10)))
-        page.update()
-
     def enter(u):
         st["user"] = u
         u_lbl.value = f"Кабинет: {u}"
-        page.controls.clear()
-        page.add(main_b)
+        auth_view.visible, main_b.visible = False, True
         load()
 
     def auth(e):
@@ -78,7 +70,10 @@ def main(page: ft.Page):
     def logout(e):
         st["user"] = ""
         page.client_storage.remove("wb_u")
-        show_auth()
+        main_b.visible, auth_view.visible = False, True
+        page.update()
+
+    auth_view = ft.Container(padding=24, content=ft.Column([ft.Container(height=20), ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=64, color=P1), a_t, u_in, p_in, tg_in, rem, a_err, ft.ElevatedButton(content=b_txt, bgcolor=P1, height=48, width=320, on_click=auth), ft.TextButton(content=sw_txt, on_click=toggle)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
 
     u_lbl = ft.Text("Кабинет", size=12, color="#E0E0E0")
     hdr = ft.Container(gradient=ft.LinearGradient(colors=[P2, P1]), padding=18, content=ft.Row([ft.Column([ft.Text("WB.Track [by.Жекич]", size=19, weight="bold"), u_lbl], expand=True), ft.IconButton(icon=ft.Icons.REFRESH_ROUNDED, icon_color="white", on_click=lambda e: load(True)), ft.IconButton(icon=ft.Icons.LOGOUT_ROUNDED, icon_color="white", on_click=logout)]))
@@ -127,9 +122,9 @@ def main(page: ft.Page):
         requests.delete(API + S + "tasks" + S + str(sku), params={"user": st["user"]}, timeout=10)
         load()
 
-    main_b = ft.ListView(expand=True, padding=0, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in]), ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, width=340, on_click=add), srch, col], spacing=10))])
-    page.add(ft.Container(expand=True, bgcolor=BG, alignment=ft.alignment.center, content=ft.Column([ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=64, color=P1), ft.Text("WB.Track", size=38, weight="bold"), ft.Text("[by.Жекич]", size=18, color="#E040FB")], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)))
+    main_b = ft.ListView(visible=False, expand=True, padding=0, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in]), ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, width=340, on_click=add), srch, col], spacing=10))])
+    page.add(auth_view, main_b)
     saved = page.client_storage.get("wb_u") or ""
-    threading.Timer(1.2, lambda: enter(saved) if saved else show_auth()).start()
+    if saved: enter(saved)
 
 ft.app(target=main)
