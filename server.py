@@ -180,7 +180,7 @@ def normalize_task(item, previous=None):
 @app.route("/", methods=["GET"])
 @app.route("/health", methods=["GET"])
 def index():
-    return jsonify({"status": "ok", "service": "WB.Track API", "require_token": REQUIRE_TOKEN, "tg_token_set": bool(TG_TOKEN)})
+    return jsonify({"status": "ok", "service": "WB.Track API", "require_token": REQUIRE_TOKEN, "tg_token_set": bool(TG_TOKEN), "tg_token_len": len(TG_TOKEN), "dotenv_path": os.path.join(HERE, ".env"), "dotenv_exists": os.path.exists(os.path.join(HERE, ".env"))})
 
 
 @app.route("/get_ui", methods=["GET"])
