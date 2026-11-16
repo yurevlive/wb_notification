@@ -51,6 +51,8 @@ def _load_dotenv(path=os.path.join(HERE, ".env")):
 
 _load_dotenv()
 
+REQUIRE_TOKEN = os.environ.get("REQUIRE_TOKEN", "").lower() in ("1", "true", "yes")
+
 
 # ------------------------------------------------------------------ хранилище
 
