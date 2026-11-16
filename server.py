@@ -209,6 +209,30 @@ def login():
     return jsonify({"ok": True, "login": login, "tg_id": user.get("tg_id", ""), "token": token})
 
 
+@app.route("/change_password", methods=["POST"])
+def change_password():
+    data = request.json or {}
+    login, _ = find_user_by_token(bearer_token())
+    if not login:
+        login = (data.get("user") or "").strip().lower()
+    users = load_json(USERS_FILE, {})
+    user = users.get(login)
+    if not user:
+        return jsonify({"ok": False, "error": "Пользователь не найден"}), 404
+    if not check_pw(user.get("password", ""), (data.get("old_password") or "").strip()):
+        return jsonify({"ok": False, "error": "Неверный пароль"}), 401
+    new_pw = (data.get("new_password") or "").strip()
+    if len(new_pw) < 4:
+        return jsonify({"ok": False, "error": "Новый пароль от 4 символов"}), 400
+    with _lock:
+        users = load_json(USERS_FILE, {})
+        if login not in users:
+            return jsonify({"ok": False, "error": "Пользователь не найден"}), 404
+        users[login]["password"] = hash_pw(new_pw)
+        save_json(USERS_FILE, users)
+    return jsonify({"ok": True})
+
+
 @app.route("/tasks", methods=["GET"])
 def get_tasks():
     if request.args.get("all") in ("1", "true"):
