@@ -30,7 +30,7 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          WB_API_BASE: ${{ vars.WB_API_BASE }}
+          WB_API_BASE: ${{ vars.WB_API_BASE || 'https://yurevlive.pythonanywhere.com' }}
         run: python worker.py
 
       - name: Save state
