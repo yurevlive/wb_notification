@@ -32,11 +32,11 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG
     page.padding = 0
-    page.scroll = ft.ScrollMode.ADAPTIVE
+    page.scroll = ft.ScrollMode.AUTO
     page.locale_configuration = ft.LocaleConfiguration(supported_locales=[ft.Locale("ru", "RU")], current_locale=ft.Locale("ru", "RU"))
     st = {"tasks": [], "user": "", "reg": False, "q": ""}
 
-    a_t = ft.Text("Вход в кабинет", size=24, weight="bold")
+    a_t = ft.Text("Вход в кабинет", size=22, weight="bold")
     u_in = ft.TextField(hint_text="Логин", border_radius=12, filled=True, bgcolor=CARD)
     p_in = ft.TextField(hint_text="Пароль", password=True, can_reveal_password=True, border_radius=12, filled=True, bgcolor=CARD)
     tg_in = ft.TextField(hint_text="Числовой Telegram ID", border_radius=12, filled=True, bgcolor=CARD, visible=False)
@@ -76,17 +76,18 @@ def main(page: ft.Page):
         main_b.visible, auth_view.visible = False, True
         page.update()
 
-    auth_view = ft.Container(padding=24, content=ft.Column([ft.Container(height=20), ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=64, color=P1), a_t, u_in, p_in, tg_in, rem, a_err, ft.ElevatedButton(content=b_txt, bgcolor=P1, height=48, width=320, on_click=auth), ft.TextButton(content=sw_txt, on_click=toggle)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
+    auth_btn = ft.ElevatedButton(content=b_txt, bgcolor=P1, height=46, on_click=auth)
+    auth_view = ft.Container(padding=20, content=ft.Column([ft.Container(height=10), ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=56, color=P1), a_t, u_in, p_in, tg_in, rem, a_err, ft.Row([ft.Container(content=auth_btn, expand=True)]), ft.TextButton(content=sw_txt, on_click=toggle)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
 
     u_lbl = ft.Text("Кабинет", size=12, color="#E0E0E0")
-    hdr = ft.Container(gradient=ft.LinearGradient(colors=[P2, P1]), padding=18, content=ft.Row([ft.Column([ft.Text("WB.Track [by.Жекич]", size=19, weight="bold"), u_lbl], expand=True), ft.IconButton(icon=ft.Icons.REFRESH_ROUNDED, icon_color="white", on_click=lambda e: load(True)), ft.IconButton(icon=ft.Icons.LOGOUT_ROUNDED, icon_color="white", on_click=logout)]))
-    s1, s2, s3 = ft.Text("0", size=18, weight="bold"), ft.Text("0", size=18, weight="bold", color="#E040FB"), ft.Text("0", size=18, weight="bold", color="#00E676")
-    stats = ft.Row([ft.Container(expand=True, bgcolor=CARD, padding=10, border_radius=12, content=ft.Column([s1, ft.Text("Всего", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER)), ft.Container(expand=True, bgcolor=CARD, padding=10, border_radius=12, content=ft.Column([s2, ft.Text("В поиске", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER)), ft.Container(expand=True, bgcolor=CARD, padding=10, border_radius=12, content=ft.Column([s3, ft.Text("Выкуплено", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER))], spacing=8)
+    hdr = ft.Container(gradient=ft.LinearGradient(colors=[P2, P1]), padding=16, content=ft.Row([ft.Column([ft.Text("WB.Track [by.Жекич]", size=18, weight="bold"), u_lbl], expand=True), ft.IconButton(icon=ft.Icons.REFRESH_ROUNDED, icon_color="white", on_click=lambda e: load(True)), ft.IconButton(icon=ft.Icons.LOGOUT_ROUNDED, icon_color="white", on_click=logout)]))
+    s1, s2, s3 = ft.Text("0", size=16, weight="bold"), ft.Text("0", size=16, weight="bold", color="#E040FB"), ft.Text("0", size=16, weight="bold", color="#00E676")
+    stats = ft.Row([ft.Container(expand=True, bgcolor=CARD, padding=8, border_radius=12, content=ft.Column([s1, ft.Text("Всего", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER)), ft.Container(expand=True, bgcolor=CARD, padding=8, border_radius=12, content=ft.Column([s2, ft.Text("В поиске", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER)), ft.Container(expand=True, bgcolor=CARD, padding=8, border_radius=12, content=ft.Column([s3, ft.Text("Выкуплено", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER))], spacing=8)
 
     sku_in = ft.TextField(hint_text="Артикул WB", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD)
-    pr_in = ft.TextField(hint_text="Цена до (₽)", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, width=170)
-    lim_in = ft.TextField(value="1", prefix_text="Шт: ", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, width=130)
-    srch = ft.TextField(hint_text="Поиск...", prefix_icon=ft.Icons.SEARCH_ROUNDED, border_radius=12, filled=True, bgcolor=CARD, height=42, on_change=lambda e: (st.update({"q": srch.value.lower()}), render(), page.update()))
+    pr_in = ft.TextField(hint_text="Цена до (₽)", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, expand=True)
+    lim_in = ft.TextField(value="1", prefix_text="Шт: ", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, width=105)
+    srch = ft.TextField(hint_text="Поиск...", prefix_icon=ft.Icons.SEARCH_ROUNDED, border_radius=12, filled=True, bgcolor=CARD, on_change=lambda e: (st.update({"q": srch.value.lower()}), render(), page.update()))
     col = ft.Column(spacing=10)
 
     def render():
@@ -97,7 +98,7 @@ def main(page: ft.Page):
             sbp, wal, tgt = it.get("current_sbp"), it.get("current_wallet"), it["target_price"]
             bt = "✅ Выкуплено" if it["bought"] >= it["limit"] else (f"Еще -{sbp - tgt} ₽" if sbp and sbp > tgt else ("🔥 Цель!" if sbp else "⏳ Обновите"))
             ps = f"СБП: {sbp} ₽ • Кош: {wal} ₽" if sbp else "Цена не загружена"
-            col.controls.append(ft.Container(bgcolor=CARD, padding=10, border_radius=14, content=ft.Row([ft.Image(src=it.get("image", ""), width=60, height=80, fit=ft.ImageFit.COVER), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=14, max_lines=2), ft.Text(f"Арт: {it['sku']} • {bt}", size=11, color="#E040FB"), ft.Text(ps, size=12, color="#00E676"), ft.Text(f"Цель: до {tgt} ₽ ({it['bought']}/{it['limit']})", size=11)], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_size=18, on_click=lambda _, s=it["sku"]: page.launch_url(WB + str(s) + S + "detail.aspx")), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color="#FF5252", icon_size=18, on_click=lambda _, s=it["sku"]: delete(s))], spacing=0)])))
+            col.controls.append(ft.Container(bgcolor=CARD, padding=10, border_radius=14, content=ft.Row([ft.Image(src=it.get("image", ""), width=56, height=76, fit=ft.ImageFit.COVER), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=13, max_lines=2), ft.Text(f"Арт: {it['sku']} • {bt}", size=11, color="#E040FB"), ft.Text(ps, size=12, color="#00E676"), ft.Text(f"Цель: до {tgt} ₽ ({it['bought']}/{it['limit']})", size=11)], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_size=18, on_click=lambda _, s=it["sku"]: page.launch_url(WB + str(s) + S + "detail.aspx")), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color="#FF5252", icon_size=18, on_click=lambda _, s=it["sku"]: delete(s))], spacing=0)])))
 
     def load(force=False):
         r = requests.get(API + S + "tasks", params={"user": st["user"]}, timeout=10)
@@ -125,8 +126,9 @@ def main(page: ft.Page):
         requests.delete(API + S + "tasks" + S + str(sku), params={"user": st["user"]}, timeout=10)
         load()
 
-    main_b = ft.Column(visible=False, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in], spacing=10), ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, width=310, on_click=add), srch, col], spacing=10))])
-    page.add(auth_view, main_b)
+    add_btn = ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, on_click=add)
+    main_b = ft.Column(visible=False, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in], spacing=8), ft.Row([ft.Container(content=add_btn, expand=True)]), srch, col], spacing=10))])
+    page.add(ft.SafeArea(ft.Column([auth_view, main_b])))
     saved = page.client_storage.get("wb_u") or ""
     if saved: enter(saved)
 
