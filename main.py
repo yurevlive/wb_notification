@@ -8,6 +8,19 @@ P1, P2, BG, CARD = "#CB11AB", "#481173", "#0E0E13", "#181820"
 
 NET_TIMEOUT = 8
 
+# Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
+# сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
+APP_VERSION = "1.0.0"
+REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
+
+
+def vt(ver):
+    """'1.0.10' -> (1, 0, 10) для правильного сравнения версий."""
+    parts = []
+    for p in str(ver).lstrip("v").split("."):
+        parts.append(int(p) if p.isdigit() else 0)
+    return tuple(parts + [0] * (3 - len(parts)))[:3]
+
 
 def fetch_wb(sku):
     vol, part = sku // 100000, sku // 1000
@@ -222,9 +235,34 @@ def main(page: ft.Page):
     add_btn = ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, on_click=add)
     main_b = ft.Column(visible=False, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in], spacing=8), ft.Row([ft.Container(content=add_btn, expand=True)]), srch, col, empty], spacing=10))])
 
-    page.add(ft.Container(bgcolor=BG, expand=True, content=ft.Column([auth_view, main_b])))
+    # ---------- обновление приложения ----------
+    upd_txt = ft.Text("", size=12, color="white", expand=True)
+    upd_bar = ft.Container(visible=False, bgcolor="#123B1E", padding=ft.padding.symmetric(horizontal=10, vertical=4),
+                           content=ft.Row([ft.Icon(ft.Icons.SYSTEM_UPDATE_ROUNDED, size=16, color="#00E676"), upd_txt,
+                                           ft.TextButton(content=ft.Text("Скачать", size=12, color="white", weight="bold"),
+                                                         on_click=lambda e: page.launch_url(st["apk"]))], spacing=4))
+
+    def check_update():
+        try:
+            r = requests.get(REL_URL, timeout=NET_TIMEOUT, headers={"Accept": "application/vnd.github+json"})
+            if r.status_code != 200:
+                return
+            data = r.json()
+            tag = (data.get("tag_name") or "").lstrip("v")
+            apk = next((a.get("browser_download_url") for a in data.get("assets") or [] if (a.get("name") or "").endswith(".apk")), "")
+            if not apk or vt(tag) <= vt(APP_VERSION):
+                return
+            st["apk"] = apk
+            upd_txt.value = f"Доступна версия {tag}"
+            upd_bar.visible = True
+            page.update()
+        except (requests.RequestException, ValueError, AttributeError):
+            pass
+
+    page.add(ft.Container(bgcolor=BG, expand=True, content=ft.Column([upd_bar, auth_view, main_b])))
 
     # первый экран уже нарисован — только теперь идём в сеть
+    bg(check_update)
     saved = page.client_storage.get("wb_u") or ""
     if saved:
         enter(saved)
