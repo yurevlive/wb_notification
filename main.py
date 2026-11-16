@@ -77,10 +77,14 @@ def main(page: ft.Page):
         page.update()
 
     auth_btn = ft.ElevatedButton(content=b_txt, bgcolor=P1, height=46, on_click=auth)
-    auth_view = ft.Container(padding=20, content=ft.Column([ft.Container(height=10), ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=56, color=P1), a_t, u_in, p_in, tg_in, rem, a_err, ft.Row([ft.Container(content=auth_btn, expand=True)]), ft.TextButton(content=sw_txt, on_click=toggle)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
+    auth_view = ft.Container(padding=20, bgcolor=BG, content=ft.Column([ft.Container(height=10), ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=56, color=P1), a_t, u_in, p_in, tg_in, rem, a_err, ft.Row([ft.Container(content=auth_btn, expand=True)]), ft.TextButton(content=sw_txt, on_click=toggle)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
 
     u_lbl = ft.Text("Кабинет", size=12, color="#E0E0E0")
-    hdr = ft.Container(gradient=ft.LinearGradient(colors=[P2, P1]), padding=16, content=ft.Row([ft.Column([ft.Text("WB.Track [by.Жекич]", size=18, weight="bold"), u_lbl], expand=True), ft.IconButton(icon=ft.Icons.REFRESH_ROUNDED, icon_color="white", on_click=lambda e: load(True)), ft.IconButton(icon=ft.Icons.LOGOUT_ROUNDED, icon_color="white", on_click=logout)]))
+    dot = ft.Icon(ft.Icons.CIRCLE, size=9, color="#00E676")
+    st_lbl = ft.Text("Онлайн", size=11, color="white", weight="w500")
+    badge = ft.Container(content=ft.Row([dot, st_lbl], spacing=4), bgcolor="#26000000", padding=ft.padding.symmetric(horizontal=8, vertical=4), border_radius=20)
+    hdr = ft.Container(gradient=ft.LinearGradient(colors=[P2, P1]), padding=16, content=ft.Row([ft.Column([ft.Text("WB.Track [by.Жекич]", size=18, weight="bold"), u_lbl], expand=True), badge, ft.IconButton(icon=ft.Icons.REFRESH_ROUNDED, icon_color="white", on_click=lambda e: load(True)), ft.IconButton(icon=ft.Icons.LOGOUT_ROUNDED, icon_color="white", on_click=logout)], spacing=4))
+
     s1, s2, s3 = ft.Text("0", size=16, weight="bold"), ft.Text("0", size=16, weight="bold", color="#E040FB"), ft.Text("0", size=16, weight="bold", color="#00E676")
     stats = ft.Row([ft.Container(expand=True, bgcolor=CARD, padding=8, border_radius=12, content=ft.Column([s1, ft.Text("Всего", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER)), ft.Container(expand=True, bgcolor=CARD, padding=8, border_radius=12, content=ft.Column([s2, ft.Text("В поиске", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER)), ft.Container(expand=True, bgcolor=CARD, padding=8, border_radius=12, content=ft.Column([s3, ft.Text("Выкуплено", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER))], spacing=8)
 
@@ -101,17 +105,23 @@ def main(page: ft.Page):
             col.controls.append(ft.Container(bgcolor=CARD, padding=10, border_radius=14, content=ft.Row([ft.Image(src=it.get("image", ""), width=56, height=76, fit=ft.ImageFit.COVER), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=13, max_lines=2), ft.Text(f"Арт: {it['sku']} • {bt}", size=11, color="#E040FB"), ft.Text(ps, size=12, color="#00E676"), ft.Text(f"Цель: до {tgt} ₽ ({it['bought']}/{it['limit']})", size=11)], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_size=18, on_click=lambda _, s=it["sku"]: page.launch_url(WB + str(s) + S + "detail.aspx")), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color="#FF5252", icon_size=18, on_click=lambda _, s=it["sku"]: delete(s))], spacing=0)])))
 
     def load(force=False):
-        r = requests.get(API + S + "tasks", params={"user": st["user"]}, timeout=10)
-        if r.status_code == 200:
-            tasks = r.json()
-            for t in tasks:
-                if force or not t.get("current_sbp"):
-                    n, w, s, img = fetch_wb(t["sku"])
-                    if s:
-                        t["name"], t["current_wallet"], t["current_sbp"], t["image"] = n, w, s, img
-                        requests.post(API + S + "tasks", json=t, timeout=6)
-            st["tasks"] = tasks
-            render()
+        try:
+            r = requests.get(API + S + "tasks", params={"user": st["user"]}, timeout=10)
+            if r.status_code == 200:
+                tasks = r.json()
+                for t in tasks:
+                    if force or not t.get("current_sbp"):
+                        n, w, s, img = fetch_wb(t["sku"])
+                        if s:
+                            t["name"], t["current_wallet"], t["current_sbp"], t["image"] = n, w, s, img
+                            requests.post(API + S + "tasks", json=t, timeout=6)
+                st["tasks"] = tasks
+                dot.color, st_lbl.value = "#00E676", "Онлайн"
+                render()
+            else:
+                dot.color, st_lbl.value = "#FF5252", "Офлайн"
+        except Exception:
+            dot.color, st_lbl.value = "#FF5252", "Офлайн"
         page.update()
 
     def add(e):
@@ -128,7 +138,7 @@ def main(page: ft.Page):
 
     add_btn = ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, on_click=add)
     main_b = ft.Column(visible=False, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in], spacing=8), ft.Row([ft.Container(content=add_btn, expand=True)]), srch, col], spacing=10))])
-    page.add(ft.SafeArea(ft.Column([auth_view, main_b])))
+    page.add(ft.Container(bgcolor=BG, content=ft.Column([auth_view, main_b])))
     saved = page.client_storage.get("wb_u") or ""
     if saved: enter(saved)
 
