@@ -8,9 +8,29 @@ import requests
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
-DATA_FILE = "tasks.json"
-TG_TOKEN = "9103986883:AAH1tV5Pn9Ti4cUGzAeLVdGFMbcWrWeDW84"
-TG_CHAT_ID = "7488893558"
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_dotenv(path=os.path.join(HERE, ".env")):
+    """Минимальный аналог python-dotenv: переменные окружения имеют приоритет."""
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                os.environ.setdefault(key.strip(), val.strip().strip("\"'"))
+    except OSError as e:
+        print(f"Не удалось прочитать .env: {e}")
+
+
+_load_dotenv()
+DATA_FILE = os.environ.get("TASKS_FILE", "tasks.json")
+TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
+TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 COEF_WALLET = 426 / 395
 COEF_SBP = 454 / 395
 
@@ -108,7 +128,26 @@ def send_tg(chat_id, text):
 def open_in_yandex(sku):
     subprocess.run(["am", "start", "-a", "android.intent.action.VIEW", "-d", wb_item_url(sku), "-p", "com.yandex.browser"], check=False)
 
+def parse_add_command(text):
+    """'АРТИКУЛ ЦЕНА [ЛИМИТ]' -> (sku, target, limit) или None."""
+    parts = text.replace(",", " ").split()
+    if len(parts) < 2:
+        return None
+    try:
+        sku = int(parts[0])
+        target = int(parts[1])
+        limit = int(parts[2]) if len(parts) >= 3 else 1
+    except ValueError:
+        return None
+    if sku <= 0 or target <= 0 or limit <= 0:
+        return None
+    return sku, target, min(limit, 99)
+
+
 def handle_tg_text(chat_id, text):
+    if TG_CHAT_ID and str(chat_id) != TG_CHAT_ID:
+        send_tg(chat_id, "⛔ Доступ закрыт.")
+        return
     if text.startswith(("/start", "/help")):
         send_tg(chat_id, "🤖 WB.Track [by.Жекич]\nОтправьте: АРТИКУЛ ЦЕНА [ЛИМИТ]\nПример: 596432419 420\n\n/list — задачи\n/del АРТИКУЛ — удалить")
         return
@@ -126,23 +165,32 @@ def handle_tg_text(chat_id, text):
         return
     if text.startswith("/del"):
         parts = text.split()
-        if len(parts) >= 2 and parts.isdigit():
-            ok = remove_task(int(parts))
-            send_tg(chat_id, f"🗑 Артикул {parts} удален." if ok else f"⚠️ Артикул {parts} не найден.")
+        if len(parts) < 2:
+            send_tg(chat_id, "⚠️ Формат: /del АРТИКУЛ")
+            return
+        try:
+            sku = int(parts[1])
+        except ValueError:
+            send_tg(chat_id, "⚠️ Формат: /del АРТИКУЛ")
+            return
+        ok = remove_task(sku)
+        send_tg(chat_id, f"🗑 Артикул {sku} удален." if ok else f"⚠️ Артикул {sku} не найден.")
         return
 
-    parts = text.replace(",", " ").split()
-    if len(parts) >= 2 and parts.isdigit() and parts.isdigit():
-        sku, target = int(parts), int(parts)
-        limit = int(parts) if (len(parts) >= 3 and parts.isdigit()) else 1
-        send_tg(chat_id, "⏳ Загружаю товар...")
-        item = create_or_update_task(sku, target, limit)
-        cur = f"{item['current_sbp']} ₽" if item["current_sbp"] else "—"
-        send_tg(chat_id, f"✅ Добавлено и синхронизировано!\n\n📦 {item['name']}\n🔢 Арт: {sku}\n💳 Сейчас (СБП): {cur}\n🎯 Цель: до {target} ₽ ({limit} шт.)")
-    else:
+    parsed = parse_add_command(text)
+    if not parsed:
         send_tg(chat_id, "⚠️ Формат: АРТИКУЛ ЦЕНА (например: 596432419 420)")
+        return
+    sku, target, limit = parsed
+    send_tg(chat_id, "⏳ Загружаю товар...")
+    item = create_or_update_task(sku, target, limit)
+    cur = f"{item['current_sbp']} ₽" if item["current_sbp"] else "—"
+    send_tg(chat_id, f"✅ Добавлено и синхронизировано!\n\n📦 {item['name']}\n🔢 Арт: {sku}\n💳 Сейчас (СБП): {cur}\n🎯 Цель: до {target} ₽ ({limit} шт.)")
 
 def telegram_listener():
+    if not TG_TOKEN:
+        print("TG_TOKEN не задан — Telegram-бот выключен.")
+        return
     print("Прием команд из Telegram запущен...")
     offset = 0
     while True:
@@ -152,11 +200,16 @@ def telegram_listener():
                 for upd in r.json().get("result", []):
                     offset = upd["update_id"] + 1
                     msg = upd.get("message", {})
-                    if msg.get("text") and msg.get("chat"):
+                    if not (msg.get("text") and msg.get("chat")):
+                        continue
+                    try:
                         handle_tg_text(str(msg["chat"]["id"]), msg["text"].strip())
+                    except Exception as e:
+                        print(f"Ошибка обработки команды: {e}")
         except Exception as e:
             print(f"Ошибка опроса TG: {e}")
             time.sleep(5)
+
 
 def worker():
     print("Фоновый мониторинг WB запущен...")
