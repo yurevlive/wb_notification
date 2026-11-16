@@ -31,6 +31,7 @@ def main(page: ft.Page):
     page.title = "WB.Track [by.Жекич]"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor, page.padding = BG, 0
+    page.locale_configuration = ft.LocaleConfiguration(supported_locales=[ft.Locale("ru", "RU")], current_locale=ft.Locale("ru", "RU"))
     st = {"tasks": [], "user": "", "reg": False, "q": ""}
 
     a_t = ft.Text("Вход в кабинет", size=24, weight="bold")
