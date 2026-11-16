@@ -8,6 +8,26 @@ import requests
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_dotenv(path=os.path.join(HERE, ".env")):
+    """Минимальный аналог python-dotenv: переменные окружения имеют приоритет."""
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                os.environ.setdefault(key.strip(), val.strip().strip("\"'"))
+    except OSError as e:
+        print(f"Не удалось прочитать .env: {e}")
+
+
+_load_dotenv()
 DATA_FILE = os.environ.get("TASKS_FILE", "tasks.json")
 TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
