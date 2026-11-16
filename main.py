@@ -123,7 +123,7 @@ def main(page: ft.Page):
         requests.delete(API + S + "tasks" + S + str(sku), params={"user": st["user"]}, timeout=10)
         load()
 
-    main_b = ft.ListView(visible=False, expand=True, padding=0, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in]), ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, width=340, on_click=add), srch, col], spacing=10))])
+    main_b = ft.Column(visible=False, expand=True, scroll="auto", controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in]), ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, width=340, on_click=add), srch, col], spacing=10))])
     page.add(auth_view, main_b)
     saved = page.client_storage.get("wb_u") or ""
     if saved: enter(saved)
