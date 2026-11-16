@@ -4,13 +4,12 @@ import requests
 S = chr(47)
 API = "".join(["ht", "tps:", S, S, "yurevlive.", "pythonanywhere.", "com"])
 WB = "".join(["ht", "tps:", S, S, "www.", "wildberries.", "ru", S, "catalog", S])
-P1, P2, BG, CARD = "#CB11AB", "#481173", "#0E0E13", "#181820"
 
 NET_TIMEOUT = 8
 
 # Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
 # сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
 
 
@@ -20,6 +19,19 @@ def vt(ver):
     for p in str(ver).lstrip("v").split("."):
         parts.append(int(p) if p.isdigit() else 0)
     return tuple(parts + [0] * (3 - len(parts)))[:3]
+
+
+def wb_open(page, sku):
+    # intent:// заставляет Android открыть именно приложение WB, если оно
+    # установлено; при отсутствии приложения сработает browser_fallback_url.
+    intent = ("intent://www.wildberries.ru/catalog/%s/detail.aspx#Intent;"
+              "scheme=https;package=com.wildberries.ru;"
+              "S.browser_fallback_url=https%%3A%%2F%%2Fwww.wildberries.ru%%2Fcatalog%%2F%s%%2Fdetail.aspx;end"
+              % (sku, sku))
+    try:
+        page.launch_url(intent)
+    except Exception:
+        page.launch_url(WB + str(sku) + S + "detail.aspx")
 
 
 def fetch_wb(sku):
@@ -55,7 +67,18 @@ def main(page: ft.Page):
     page.padding = 0
     page.scroll = ft.ScrollMode.AUTO
     page.locale_configuration = ft.LocaleConfiguration(supported_locales=[ft.Locale("ru", "RU")], current_locale=ft.Locale("ru", "RU"))
-    st = {"tasks": [], "user": "", "token": "", "reg": False, "q": "", "busy": False}
+    # тема из сохранённых настроек
+    _theme = page.client_storage.get("wb_theme") or "dark"
+    if _theme == "light":
+        P1, P2, BG, CARD, CARD2, BORDER = "#CB11AB", "#E91E8C", "#F5F5F7", "#FFFFFF", "#FFFFFF", "#E5E5EA"
+        OK, WARN, DANGER = "#00B85A", "#F59E0B", "#EF4444"
+        page.theme_mode = ft.ThemeMode.LIGHT
+    else:
+        P1, P2, BG, CARD, CARD2, BORDER = "#D946EF", "#7C3AED", "#0B0B12", "#16161F", "#1E1E2A", "#2A2A38"
+        OK, WARN, DANGER = "#22C55E", "#F59E0B", "#EF4444"
+        page.theme_mode = ft.ThemeMode.DARK
+    page.bgcolor = BG
+    st = {"tasks": [], "user": "", "token": "", "reg": False, "q": "", "busy": False, "alerted_shown": False}
 
     def bg(fn, *args):
         """Сеть — только в фоне, иначе UI замирает чёрным экраном."""
@@ -155,7 +178,7 @@ def main(page: ft.Page):
         page.update()
 
     auth_btn = ft.ElevatedButton(content=b_txt, bgcolor=P1, height=46, on_click=auth)
-    auth_view = ft.Container(padding=20, bgcolor=BG, expand=True, content=ft.Column([ft.Container(height=10), ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=56, color=P1), a_t, u_in, p_in, tg_in, rem, a_err, ft.Row([ft.Container(content=auth_btn, expand=True)]), ft.TextButton(content=sw_txt, on_click=toggle)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
+    auth_view = ft.Container(padding=20, bgcolor=BG, expand=True, content=ft.Column([ft.Container(height=20), ft.Container(width=72, height=72, border_radius=20, gradient=ft.LinearGradient(colors=[P2, P1]), content=ft.Icon(ft.Icons.TRACK_CHANGES_ROUNDED, size=40, color="white"), alignment=ft.alignment.center), ft.Text("WB.Track", size=24, weight="bold", color="white"), a_t, u_in, p_in, tg_in, rem, a_err, ft.Container(content=auth_btn, expand=True), ft.TextButton(content=sw_txt, on_click=toggle)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
 
     # ---------- шапка ----------
     u_lbl = ft.Text("Кабинет", size=12, color="#E0E0E0")
@@ -163,11 +186,11 @@ def main(page: ft.Page):
     st_lbl = ft.Text("Онлайн", size=11, color="white", weight="w500")
     spin = ft.ProgressRing(width=12, height=12, stroke_width=2, color="white", visible=False)
     badge = ft.Container(content=ft.Row([dot, spin, st_lbl], spacing=4), bgcolor="#26000000", padding=ft.padding.symmetric(horizontal=8, vertical=4), border_radius=20)
-    hdr = ft.Container(gradient=ft.LinearGradient(colors=[P2, P1]), padding=16, content=ft.Row([ft.Column([ft.Text("WB.Track [by.Жекич]", size=18, weight="bold"), u_lbl], expand=True), badge, ft.IconButton(icon=ft.Icons.REFRESH_ROUNDED, icon_color="white", on_click=lambda e: load(True)), ft.IconButton(icon=ft.Icons.LOGOUT_ROUNDED, icon_color="white", on_click=logout)], spacing=4))
+    hdr = ft.Container(gradient=ft.LinearGradient(colors=[P2, P1]), padding=ft.padding.symmetric(horizontal=16, vertical=18), content=ft.Row([ft.Column([ft.Text("WB.Track", size=20, weight="bold", color="white"), u_lbl], expand=True, spacing=2), badge, ft.IconButton(icon=ft.Icons.SETTINGS_ROUNDED, icon_color="white", icon_size=20, on_click=lambda e: open_settings()), ft.IconButton(icon=ft.Icons.REFRESH_ROUNDED, icon_color="white", icon_size=20, on_click=lambda e: load(True))], spacing=6))
 
     # ---------- статистика ----------
-    s1, s2, s3 = ft.Text("0", size=16, weight="bold"), ft.Text("0", size=16, weight="bold", color="#E040FB"), ft.Text("0", size=16, weight="bold", color="#00E676")
-    stats = ft.Row([ft.Container(expand=True, bgcolor=CARD, padding=8, border_radius=12, content=ft.Column([s1, ft.Text("Всего", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER)), ft.Container(expand=True, bgcolor=CARD, padding=8, border_radius=12, content=ft.Column([s2, ft.Text("В поиске", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER)), ft.Container(expand=True, bgcolor=CARD, padding=8, border_radius=12, content=ft.Column([s3, ft.Text("Выкуплено", size=11)], horizontal_alignment=ft.CrossAxisAlignment.CENTER))], spacing=8)
+    s1, s2, s3 = ft.Text("0", size=20, weight="bold", color="white"), ft.Text("0", size=20, weight="bold", color=P1), ft.Text("0", size=20, weight="bold", color=OK)
+    stats = ft.Row([ft.Container(expand=True, bgcolor=CARD, padding=10, border_radius=14, border=ft.border.all(1, BORDER), content=ft.Column([s1, ft.Text("Всего", size=11, color="#8A8A94")], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2)), ft.Container(expand=True, bgcolor=CARD, padding=10, border_radius=14, border=ft.border.all(1, BORDER), content=ft.Column([s2, ft.Text("В поиске", size=11, color="#8A8A94")], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2)), ft.Container(expand=True, bgcolor=CARD, padding=10, border_radius=14, border=ft.border.all(1, BORDER), content=ft.Column([s3, ft.Text("Выкуплено", size=11, color="#8A8A94")], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2))], spacing=8)
 
     # ---------- список ----------
     sku_in = ft.TextField(hint_text="Артикул WB", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD)
@@ -175,7 +198,7 @@ def main(page: ft.Page):
     lim_in = ft.TextField(value="1", prefix_text="Шт: ", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, width=105)
     srch = ft.TextField(hint_text="Поиск...", prefix_icon=ft.Icons.SEARCH_ROUNDED, border_radius=12, filled=True, bgcolor=CARD, on_change=lambda e: (st.update({"q": srch.value.lower()}), render(), page.update()))
     col = ft.Column(spacing=10)
-    empty = ft.Container(visible=False, padding=30, content=ft.Column([ft.Icon(ft.Icons.INBOX_ROUNDED, size=42, color="#4A4A55"), ft.Text("Пока пусто — добавьте артикул", size=13, color="#8A8A94")], horizontal_alignment=ft.CrossAxisAlignment.CENTER))
+    empty = ft.Container(visible=False, padding=40, content=ft.Column([ft.Icon(ft.Icons.INBOX_ROUNDED, size=56, color="#3A3A48"), ft.Text("Пока пусто", size=16, weight="bold", color="#8A8A94"), ft.Text("Добавьте артикул и цену — начнём следить", size=12, color="#5A5A66")], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6))
 
     def render():
         col.controls.clear()
@@ -187,7 +210,7 @@ def main(page: ft.Page):
             sbp, wal, tgt = it.get("current_sbp"), it.get("current_wallet"), it["target_price"]
             bt = "✅ Выкуплено" if it["bought"] >= it["limit"] else (f"Еще -{sbp - tgt} ₽" if sbp and sbp > tgt else ("🔥 Цель!" if sbp else "⏳ Обновите"))
             ps = f"СБП: {sbp} ₽ • Кош: {wal} ₽" if sbp else "Цена не загружена"
-            col.controls.append(ft.Container(bgcolor=CARD, padding=10, border_radius=14, content=ft.Row([ft.Image(src=it.get("image", ""), width=56, height=76, fit=ft.ImageFit.COVER), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=13, max_lines=2), ft.Text(f"Арт: {it['sku']} • {bt}", size=11, color="#E040FB"), ft.Text(ps, size=12, color="#00E676"), ft.Text(f"Цель: до {tgt} ₽ ({it['bought']}/{it['limit']})", size=11)], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, icon_color="#00E676", icon_size=18, tooltip="Выкупить", visible=it["bought"] < it["limit"], on_click=lambda _, t=it: buy(t)), ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_size=18, on_click=lambda _, s=it["sku"]: page.launch_url(WB + str(s) + S + "detail.aspx")), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color="#FF5252", icon_size=18, on_click=lambda _, s=it["sku"]: bg(delete, s))], spacing=0)])))
+            col.controls.append(ft.Container(bgcolor=CARD, padding=12, border_radius=16, border=ft.border.all(1, BORDER), content=ft.Row([ft.Container(content=ft.Image(src=it.get("image", ""), width=64, height=86, fit=ft.ImageFit.COVER), border_radius=10, clip_behavior=ft.ClipBehavior.ANTI_ALIAS), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=14, max_lines=2, color="white"), ft.Text(f"Арт: {it['sku']}", size=11, color="#8A8A94"), ft.Row([ft.Text((f"{sbp} ₽" if sbp else "—"), size=18, weight="bold", color=(OK if (sbp and sbp <= tgt) else WARN)), ft.Text((f"кош. {wal} ₽" if wal else ""), size=11, color="#8A8A94")], spacing=8), ft.Text(bt, size=11, color=P1, weight="w500"), ft.Text(f"Цель ≤ {tgt} ₽  ·  выкуплено {it['bought']}/{it['limit']}", size=11, color="#8A8A94")], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, icon_color=OK, icon_size=20, tooltip="Выкупить", visible=it["bought"] < it["limit"], on_click=lambda _, t=it: buy(t)), ft.IconButton(icon=ft.Icons.EDIT_ROUNDED, icon_color="#A0A0B0", icon_size=20, tooltip="Редактировать", on_click=lambda _, t=it: edit(t)), ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_color="#A0A0B0", icon_size=20, tooltip="Открыть в WB", on_click=lambda _, s=it["sku"]: wb_open(page, s)), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color=DANGER, icon_size=20, on_click=lambda _, s=it["sku"]: bg(delete, s))], spacing=0)], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)))
 
     def load(force=False):
         if st["busy"]:
@@ -212,6 +235,12 @@ def main(page: ft.Page):
                     if s:
                         t["name"], t["current_wallet"], t["current_sbp"], t["image"] = n, w, s, img
             st["tasks"] = tasks
+            reached = [t for t in tasks if t.get("current_sbp") and t["current_sbp"] <= t["target_price"] and (t.get("bought") or 0) < (t.get("limit") or 1)]
+            if reached and not st.get("alerted_shown"):
+                st["alerted_shown"] = True
+                snack = ft.SnackBar(content=ft.Text(f"🔥 Цена достигнута: {reached[0].get('name', '')}", color="white", weight="bold"), bgcolor="#1B5E20", duration=4000)
+                page.overlay.append(snack)
+                snack.open = True
             render()
         except (requests.RequestException, ValueError):
             dot.color, st_lbl.value = "#FF5252", "Офлайн"
@@ -270,8 +299,52 @@ def main(page: ft.Page):
         st["busy"] = False
         load()
 
+    def edit(task):
+        pr_f = ft.TextField(value=str(task["target_price"]), label="Цена до (₽)", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD)
+        lim_f = ft.TextField(value=str(task.get("limit") or 1), label="Кол-во (шт)", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD)
+        err = ft.Text("", size=12, color=DANGER)
+
+        def save(e):
+            try:
+                tgt = int(pr_f.value.strip())
+                lim = int(lim_f.value.strip() or 1)
+            except ValueError:
+                err.value = "Введите числа"
+                page.update()
+                return
+            if tgt <= 0 or lim < 1:
+                err.value = "Значения должны быть > 0"
+                page.update()
+                return
+            dlg.open = False
+            page.update()
+            busy(True, "Сохраняю...")
+            bg(_edit_request, task, tgt, lim)
+
+        dlg = ft.AlertDialog(
+            title=ft.Text(f"Редактировать {task['sku']}", weight="bold", size=16),
+            content=ft.Column([pr_f, lim_f, err], spacing=10, tight=True),
+            actions=[ft.TextButton(content=ft.Text("Отмена", color="#8A8A94"), on_click=lambda e: (setattr(dlg, "open", False), page.update())),
+                     ft.ElevatedButton(content=ft.Text("Сохранить", color="white", weight="bold"), bgcolor=P1, on_click=save)],
+        )
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
+
+    def _edit_request(task, tgt, lim):
+        payload = {"owner": st["user"], "sku": task["sku"], "target_price": tgt, "limit": lim,
+                   "name": task.get("name"), "image": task.get("image"),
+                   "current_sbp": task.get("current_sbp"), "current_wallet": task.get("current_wallet"),
+                   "bought": task.get("bought") or 0}
+        try:
+            requests.post(API + S + "tasks", json=payload, headers=auth_headers(), timeout=NET_TIMEOUT)
+        except (requests.RequestException, ValueError):
+            pass
+        st["busy"] = False
+        load()
+
     add_btn = ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, on_click=add)
-    main_b = ft.Column(visible=False, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, sku_in, ft.Row([pr_in, lim_in], spacing=8), ft.Row([ft.Container(content=add_btn, expand=True)]), srch, col, empty], spacing=10))])
+    main_b = ft.Column(visible=False, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, ft.Container(bgcolor=CARD, padding=12, border_radius=16, border=ft.border.all(1, BORDER), content=ft.Column([ft.Row([sku_in], spacing=8), ft.Row([pr_in, lim_in], spacing=8), ft.Container(content=add_btn, expand=True)], spacing=10)), srch, col, empty, ft.Text(f"WB.Track v{APP_VERSION}", size=10, color="#5A5A66", text_align=ft.TextAlign.CENTER)], spacing=12, horizontal_alignment=ft.CrossAxisAlignment.CENTER))])
 
     # ---------- обновление приложения ----------
     upd_txt = ft.Text("", size=12, color="white", expand=True)
@@ -296,6 +369,105 @@ def main(page: ft.Page):
             page.update()
         except (requests.RequestException, ValueError, AttributeError):
             pass
+
+    def open_settings():
+        status_txt = ft.Text("", size=13, color=P1, weight="bold", opacity=0, animate_opacity=ft.Animation(400, "easeOut"), animate_scale=ft.Animation(400, "easeOut"))
+
+        def change_password():
+            old_f = ft.TextField(label="Старый пароль", password=True, can_reveal_password=True, border_radius=12, filled=True, bgcolor=CARD)
+            new_f = ft.TextField(label="Новый пароль", password=True, can_reveal_password=True, border_radius=12, filled=True, bgcolor=CARD)
+            err = ft.Text("", size=12, color=DANGER)
+            def save(e):
+                try:
+                    r = requests.post(API + S + "change_password", json={"user": st["user"], "old_password": old_f.value.strip(), "new_password": new_f.value.strip()}, headers=auth_headers(), timeout=NET_TIMEOUT)
+                    data = r.json()
+                except (requests.RequestException, ValueError):
+                    err.value = "Нет связи с сервером"
+                    page.update()
+                    return
+                if not data.get("ok"):
+                    err.value = data.get("error", "Ошибка")
+                    page.update()
+                    return
+                dlg2.open = False
+                page.update()
+                snack = ft.SnackBar(content=ft.Text("Пароль изменён", color="white"), bgcolor="#1B5E20")
+                page.overlay.append(snack)
+                snack.open = True
+                page.update()
+            dlg2 = ft.AlertDialog(
+                title=ft.Text("Смена пароля", weight="bold", size=16),
+                content=ft.Column([old_f, new_f, err], spacing=10, tight=True),
+                actions=[ft.TextButton(content=ft.Text("Отмена", color="#8A8A94"), on_click=lambda e: (setattr(dlg2, "open", False), page.update())),
+                         ft.ElevatedButton(content=ft.Text("Сохранить", color="white", weight="bold"), bgcolor=P1, on_click=save)],
+            )
+            page.overlay.append(dlg2)
+            dlg2.open = True
+            page.update()
+
+        def toggle_theme(e):
+            cur = page.client_storage.get("wb_theme") or "dark"
+            new = "light" if cur == "dark" else "dark"
+            page.client_storage.set("wb_theme", new)
+            snack = ft.SnackBar(content=ft.Text(f"Тема: {new}. Перезапустите приложение.", color="white"), bgcolor="#1B5E20")
+            page.overlay.append(snack)
+            snack.open = True
+            page.update()
+
+        def do_check():
+            status_txt.opacity = 0
+            status_txt.scale = 0.8
+            spinner.visible = True
+            status_txt.value = "Проверяю..."
+            page.update()
+            try:
+                r = requests.get(REL_URL, timeout=NET_TIMEOUT, headers={"Accept": "application/vnd.github+json"})
+                if r.status_code != 200:
+                    status_txt.value = "Не удалось проверить"
+                else:
+                    data = r.json()
+                    tag = (data.get("tag_name") or "").lstrip("v")
+                    if vt(tag) <= vt(APP_VERSION):
+                        status_txt.value = f"✓ У вас последняя версия ({APP_VERSION})"
+                    else:
+                        st["apk"] = next((a.get("browser_download_url") for a in data.get("assets") or [] if (a.get("name") or "").endswith(".apk")), "")
+                        status_txt.value = f"Доступна {tag}"
+                        upd_txt.value = f"Доступна версия {tag}"
+                        upd_bar.visible = True
+            except (requests.RequestException, ValueError, AttributeError):
+                status_txt.value = "Нет связи с сервером"
+            spinner.visible = False
+            status_txt.opacity = 1
+            status_txt.scale = 1.0
+            page.update()
+
+        cur_theme = page.client_storage.get("wb_theme") or "dark"
+        theme_label = "Тёмная" if cur_theme == "dark" else "Светлая"
+
+        spinner = ft.ProgressRing(width=14, height=14, stroke_width=2, color=P1, visible=False)
+        dlg = ft.AlertDialog(
+            title=ft.Text("Настройки", weight="bold"),
+            content=ft.Column([
+                ft.Text("Аккаунт", size=12, weight="bold", color="#8A8A94"),
+                ft.Text(f"Пользователь: {st['user'] or '—'}", size=12, color="#8A8A94"),
+                ft.ElevatedButton(content=ft.Text("Сменить пароль", color="white", weight="bold"), bgcolor=CARD2, on_click=lambda e: change_password()),
+                ft.ElevatedButton(content=ft.Text("Выйти", color=DANGER, weight="bold"), bgcolor=CARD2, on_click=lambda e: (setattr(dlg, "open", False), page.update(), logout(None))),
+                ft.Divider(height=1, color=BORDER),
+                ft.Text("Приложение", size=12, weight="bold", color="#8A8A94"),
+                ft.Row([ft.ElevatedButton(content=ft.Text("Проверить обновления", color="white", weight="bold"), bgcolor=P1, on_click=lambda e: bg(do_check)), spinner], spacing=10),
+                status_txt,
+                ft.TextButton(content=ft.Text("Скачать обновление", color=P1), visible=bool(st.get("apk")), on_click=lambda e: page.launch_url(st["apk"])),
+                ft.ElevatedButton(content=ft.Text(f"Тема: {theme_label} (переключить)", color="white", weight="bold"), bgcolor=CARD2, on_click=toggle_theme),
+                ft.Divider(height=1, color=BORDER),
+                ft.Text("О приложении", size=12, weight="bold", color="#8A8A94"),
+                ft.Text("WB.Track — трекер цен Wildberries.", size=12, color="#8A8A94"),
+                ft.Text("В разработке", size=11, color="#5A5A66", italic=True),
+            ], spacing=8, tight=True),
+            actions=[ft.TextButton(content=ft.Text("Закрыть", color=P1), on_click=lambda e: (setattr(dlg, "open", False), page.update()))],
+        )
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
 
     page.add(ft.Container(bgcolor=BG, expand=True, content=ft.Column([upd_bar, auth_view, main_b])))
 
