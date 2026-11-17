@@ -832,7 +832,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>show
 let current='overview';
 async function render(t){current=t;const v=document.getElementById('view');v.innerHTML='Загрузка...';
   if(t==='overview'){const d=await api('/admin/api/overview');const ts=await api('/admin/api/tasks');const byOwner={};ts.forEach(x=>{const o=x.owner||'default';byOwner[o]=(byOwner[o]||0)+1;});const max=Math.max(1,...Object.values(byOwner));const bars=Object.entries(byOwner).map(([o,c])=>`<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span style="width:120px;font-size:12px">${o}</span><div style="flex:1;background:#1E1E2A;border-radius:6px;height:18px"><div style="width:${Math.round(c/max*100)}%;background:#D946EF;height:18px;border-radius:6px"></div></div><b style="font-size:12px">${c}</b></div>`).join('');v.innerHTML=`<div class="card"><div class="stat"><b>${d.users}</b>пользователей</div><div class="stat"><b>${d.tasks}</b>задач</div><div class="stat"><b>${d.contacts}</b>контактов TG</div></div><div class="card"><h3 style="margin:0 0 8px">Задачи по владельцам</h3>${bars||'<div class="muted">Задач нет</div>'}</div><div class="card"><div class="muted">Последняя проверка: ${d.last_check?new Date(d.last_check*1000).toLocaleString():'—'}</div><div class="muted">REQUIRE_TOKEN: ${d.require_token}</div><div style="margin-top:8px"><button class="primary" onclick="runCheck()">Запустить проверку</button> <span class="muted" id="runres"></span></div></div>`;}
-  window.runCheck=async function(){const r=await api('/admin/api/run',{method:'POST'});document.getElementById('runres').textContent=r.message||r.error||'';toast(r.ok?'Запущено':'Ошибка');};
+  window.runCheck=async function(){const r=await api('/admin/api/run',{method:'POST'});if(r.url){window.open(r.url,'_blank');}document.getElementById('runres').textContent=r.message||'';toast(r.ok?'Готово':'Ошибка');};
   if(t==='users'){const d=await api('/admin/api/users');v.innerHTML=`<div class="card"><table><tr><th>Логин</th><th>TG id</th><th>Токен</th><th>Действия</th></tr>${d.map(u=>`<tr><td>${u.login}</td><td>${u.tg_id||'—'}</td><td>${u.has_token?'да':'нет'}</td><td><button class="danger" onclick="delUser('${u.login}')">Удалить</button> <button onclick="resetPw('${u.login}')">Сбросить пароль</button></td></tr>`).join('')}</table></div>`;}
   if(t==='tasks'){const d=await api('/admin/api/tasks');v.innerHTML=`<div class="card"><table><tr><th>Владелец</th><th>Артикул</th><th>Цена</th><th>Цель</th><th>Куплено</th><th></th></tr>${d.map(t=>`<tr><td>${t.owner}</td><td>${t.sku}</td><td>${t.current_sbp||'—'}</td><td>${t.target_price}</td><td>${t.bought}/${t.limit}</td><td><button class="danger" onclick="delTask('${t.owner}',${t.sku})">Удалить</button></td></tr>`).join('')}</table></div>`;}
   if(t==='broadcast'){v.innerHTML=`<div class="card"><textarea id="btext" rows="4" placeholder="Текст сообщения всем пользователям"></textarea><div style="margin-top:8px"><button class="primary" onclick="broadcast()">Отправить</button></div><div class="muted" id="bres"></div></div>`;}
@@ -1039,7 +1039,8 @@ def admin_run():
         return g
     gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
     if not gh_token:
-        return jsonify({"ok": False, "error": "GITHUB_TOKEN не задан на сервере", "url": "https://github.com/yurevlive/wb_notification/actions/workflows/monitor.yml"}), 200
+        return jsonify({"ok": True, "url": "https://github.com/yurevlive/wb_notification/actions/workflows/monitor.yml",
+                        "message": "GITHUB_TOKEN не задан — открой Actions вручную"}), 200
     try:
         r = requests.post(
             "https://api.github.com/repos/yurevlive/wb_notification/actions/workflows/monitor.yml/dispatches",
