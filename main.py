@@ -10,7 +10,7 @@ NET_TIMEOUT = 8
 
 # Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
 # сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
 
 
@@ -413,6 +413,16 @@ def main(page: ft.Page):
             page.overlay.append(snack); snack.open = True; page.update()
 
     paste_btn = ft.IconButton(icon=ft.Icons.CONTENT_PASTE_ROUNDED, icon_color=P1, tooltip="Вставить ссылку из буфера", on_click=lambda e: bg(paste_link))
+
+    def on_route_change(e):
+        sku = sku_from_text(getattr(page, "route", "") or "")
+        if sku:
+            sku_in.value = str(sku)
+            page.update()
+            snack = ft.SnackBar(content=ft.Text(f"Артикул {sku} из ссылки", color="white"), bgcolor="#1B5E20")
+            page.overlay.append(snack); snack.open = True; page.update()
+
+    page.on_route_change = on_route_change
     col = ft.Column(spacing=10)
     empty = ft.Container(visible=False, padding=40, content=ft.Column([ft.Icon(ft.Icons.INBOX_ROUNDED, size=56, color="#3A3A48"), ft.Text("Пока пусто", size=16, weight="bold", color="#8A8A94"), ft.Text("Добавьте артикул и цену — начнём следить", size=12, color="#5A5A66")], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6))
 

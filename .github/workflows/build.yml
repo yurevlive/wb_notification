@@ -96,8 +96,8 @@ jobs:
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           ARGS=(--project "wb-track" --product "WB.Track [by.Жекич]"
-                --build-version "$VER" --build-number "$GITHUB_RUN_NUMBER")
-                --deep-linking-scheme "https" --deep-linking-host "wildberries.ru"
+                --build-version "$VER" --build-number "$GITHUB_RUN_NUMBER"
+      --deep-linking-scheme "https" --deep-linking-host "wildberries.ru")
           if [ "$SIGNED" = "1" ]; then
             ARGS+=(--android-signing-key-store "$GITHUB_WORKSPACE/upload.jks"
                    --android-signing-key-store-password "$STORE_PASS"
