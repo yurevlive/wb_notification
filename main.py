@@ -39,6 +39,26 @@ def sparkline(points, width_bars=22, height=30):
     return ft.Row(bars, spacing=3, height=height, vertical_alignment=ft.CrossAxisAlignment.END)
 
 
+def trend_info(history, current):
+    """Возвращает (стрелка, цвет) по истории цен."""
+    pts = [int(p) for p in (history or []) if p]
+    if len(pts) < 2 or not current:
+        return "", None
+    prev = pts[-2]
+    if current < prev:
+        return "↓", "#22C55E"
+    if current > prev:
+        return "↑", "#EF4444"
+    return "→", "#8A8A94"
+
+
+def is_min_30(history, current):
+    pts = [int(p) for p in (history or []) if p]
+    if len(pts) < 3 or not current:
+        return False
+    return current <= min(pts[-30:]) and current == min(pts)
+
+
 def ago_text(ts):
     try:
         ts = int(ts)
@@ -497,11 +517,19 @@ def main(page: ft.Page):
         s1.value, s2.value, s3.value = str(len(all_t)), str(len([t for t in all_t if t["bought"] < t["limit"]])), str(len([t for t in all_t if t["bought"] >= t["limit"]]))
         visible = [t for t in all_t if st["q"] in str(t["sku"]) or st["q"] in (t.get("name") or "").lower()]
         empty.visible = not visible
+        _cards = []
         for it in visible:
             sbp, wal, tgt = it.get("current_sbp"), it.get("current_wallet"), it["target_price"]
             bt = "✅ Выкуплено" if it["bought"] >= it["limit"] else (f"Еще -{sbp - tgt} ₽" if sbp and sbp > tgt else ("🔥 Цель!" if sbp else "⏳ Обновите"))
             ps = f"СБП: {sbp} ₽ • Кош: {wal} ₽" if sbp else "Цена не загружена"
-            col.controls.append(ft.Container(bgcolor=CARD, padding=12, border_radius=16, border=ft.border.all(1, BORDER), content=ft.Row([ft.Container(content=ft.Image(src=it.get("image", ""), width=64, height=86, fit=ft.ImageFit.COVER), border_radius=10, clip_behavior=ft.ClipBehavior.ANTI_ALIAS), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=14, max_lines=2, color="white"), ft.Text(f"Арт: {it['sku']}", size=11, color="#8A8A94"), ft.Row([ft.Text((f"{sbp} ₽" if sbp else "—"), size=18, weight="bold", color=(OK if (sbp and sbp <= tgt) else WARN)), ft.Text((f"кош. {wal} ₽" if wal else ""), size=11, color="#8A8A94")], spacing=8), sparkline(it.get("history") or []), ft.Text(bt, size=11, color=P1, weight="w500"), ft.Text(f"Цель ≤ {tgt} ₽  ·  выкуплено {it['bought']}/{it['limit']}", size=11, color="#8A8A94")], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, icon_color=OK, icon_size=20, tooltip="Выкупить", visible=it["bought"] < it["limit"], on_click=lambda _, t=it: buy(t)), ft.IconButton(icon=ft.Icons.EDIT_ROUNDED, icon_color="#A0A0B0", icon_size=20, tooltip="Редактировать", on_click=lambda _, t=it: edit(t)), ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_color="#A0A0B0", icon_size=20, tooltip="Открыть в WB", on_click=lambda _, s=it["sku"]: wb_open(page, s)), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color=DANGER, icon_size=20, on_click=lambda _, s=it["sku"]: bg(delete, s))], spacing=0)], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)))
+            col.controls.append(ft.Container(bgcolor=CARD, padding=12, border_radius=16, border=ft.border.all(1, BORDER), animate_opacity=ft.Animation(350, "easeOut"), opacity=0, content=ft.Row([ft.Container(content=ft.Image(src=it.get("image", ""), width=64, height=86, fit=ft.ImageFit.COVER), border_radius=10, clip_behavior=ft.ClipBehavior.ANTI_ALIAS), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=14, max_lines=2, color="white"), ft.Text(f"Арт: {it['sku']}", size=11, color="#8A8A94"), ft.Row([ft.Text((f"{sbp} ₽" if sbp else "—"), size=18, weight="bold", color=(OK if (sbp and sbp <= tgt) else WARN)), ft.Text(trend_info(it.get("history") or [], sbp)[0], size=16, weight="bold", color=trend_info(it.get("history") or [], sbp)[1] or "#8A8A94"), ft.Text("мин.30д" if is_min_30(it.get("history") or [], sbp) else "", size=10, color="#22C55E", weight="bold"), ft.Text((f"кош. {wal} ₽" if wal else ""), size=11, color="#8A8A94")], spacing=8), sparkline(it.get("history") or []), ft.Text(bt, size=11, color=P1, weight="w500"), ft.Text(f"Цель ≤ {tgt} ₽  ·  выкуплено {it['bought']}/{it['limit']}", size=11, color="#8A8A94")], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, icon_color=OK, icon_size=20, tooltip="Выкупить", visible=it["bought"] < it["limit"], on_click=lambda _, t=it: buy(t)), ft.IconButton(icon=ft.Icons.EDIT_ROUNDED, icon_color="#A0A0B0", icon_size=20, tooltip="Редактировать", on_click=lambda _, t=it: edit(t)), ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_color="#A0A0B0", icon_size=20, tooltip="Открыть в WB", on_click=lambda _, s=it["sku"]: wb_open(page, s)), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color=DANGER, icon_size=20, on_click=lambda _, s=it["sku"]: bg(delete, s))], spacing=0)], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)))
+
+    _cards = [c for c in col.controls]
+    if _cards:
+        page.update()
+        for c in _cards:
+            c.opacity = 1
+        page.update()
 
     def load(force=False):
         if st["busy"]:
