@@ -32,6 +32,7 @@ CONTACTS_FILE = os.environ.get("CONTACTS_FILE") or os.path.join(HERE, "contacts.
 LOGINS_FILE = os.environ.get("LOGINS_FILE") or os.path.join(HERE, "logins.json")
 HISTORY_FILE = os.environ.get("HISTORY_FILE") or os.path.join(HERE, "history.json")
 META_FILE = os.environ.get("META_FILE") or os.path.join(HERE, "meta.json")
+WORKER_LOG_FILE = os.environ.get("WORKER_LOG_FILE") or os.path.join(HERE, "worker_log.json")
 CODE_TTL = 300
 S = "/"
 
@@ -815,6 +816,7 @@ input,textarea{background:#1E1E2A;color:#E0E0E0;border:1px solid #2A2A38;border-
 <button class="tab" data-t="tasks">Задачи</button>
 <button class="tab" data-t="broadcast">Рассылка</button>
 <button class="tab" data-t="calc">Калькулятор</button>
+<button class="tab" data-t="logs">Логи воркера</button>
 </div>
 <div id="view"></div>
 </main><div id="toast"></div>
@@ -829,7 +831,8 @@ function showTab(t){document.querySelectorAll('.tab').forEach(b=>b.classList.tog
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.t)));
 let current='overview';
 async function render(t){current=t;const v=document.getElementById('view');v.innerHTML='Загрузка...';
-  if(t==='overview'){const d=await api('/admin/api/overview');v.innerHTML=`<div class="card"><div class="stat"><b>${d.users}</b>пользователей</div><div class="stat"><b>${d.tasks}</b>задач</div><div class="stat"><b>${d.contacts}</b>контактов TG</div></div><div class="card"><div class="muted">Последняя проверка: ${d.last_check?new Date(d.last_check*1000).toLocaleString():'—'}</div><div class="muted">REQUIRE_TOKEN: ${d.require_token}</div></div>`;}
+  if(t==='overview'){const d=await api('/admin/api/overview');v.innerHTML=`<div class="card"><div class="stat"><b>${d.users}</b>пользователей</div><div class="stat"><b>${d.tasks}</b>задач</div><div class="stat"><b>${d.contacts}</b>контактов TG</div></div><div class="card"><div class="muted">Последняя проверка: ${d.last_check?new Date(d.last_check*1000).toLocaleString():'—'}</div><div class="muted">REQUIRE_TOKEN: ${d.require_token}</div><div style="margin-top:8px"><button class="primary" onclick="runCheck()">Запустить проверку</button> <span class="muted" id="runres"></span></div></div>`;}
+  window.runCheck=async function(){const r=await api('/admin/api/run',{method:'POST'});document.getElementById('runres').textContent=r.message||r.error||'';toast(r.ok?'Запущено':'Ошибка');};
   if(t==='users'){const d=await api('/admin/api/users');v.innerHTML=`<div class="card"><table><tr><th>Логин</th><th>TG id</th><th>Токен</th><th>Действия</th></tr>${d.map(u=>`<tr><td>${u.login}</td><td>${u.tg_id||'—'}</td><td>${u.has_token?'да':'нет'}</td><td><button class="danger" onclick="delUser('${u.login}')">Удалить</button> <button onclick="resetPw('${u.login}')">Сбросить пароль</button></td></tr>`).join('')}</table></div>`;}
   if(t==='tasks'){const d=await api('/admin/api/tasks');v.innerHTML=`<div class="card"><table><tr><th>Владелец</th><th>Артикул</th><th>Цена</th><th>Цель</th><th>Куплено</th><th></th></tr>${d.map(t=>`<tr><td>${t.owner}</td><td>${t.sku}</td><td>${t.current_sbp||'—'}</td><td>${t.target_price}</td><td>${t.bought}/${t.limit}</td><td><button class="danger" onclick="delTask('${t.owner}',${t.sku})">Удалить</button></td></tr>`).join('')}</table></div>`;}
   if(t==='broadcast'){v.innerHTML=`<div class="card"><textarea id="btext" rows="4" placeholder="Текст сообщения всем пользователям"></textarea><div style="margin-top:8px"><button class="primary" onclick="broadcast()">Отправить</button></div><div class="muted" id="bres"></div></div>`;}
@@ -853,6 +856,7 @@ async function render(t){current=t;const v=document.getElementById('view');v.inn
     const g=document.getElementById('calcgrid');
     btns.forEach(b=>{const el=document.createElement('button');el.textContent=b;el.style.cssText='padding:12px;font-size:18px;border:none;border-radius:8px;background:#2A2A38;color:#E0E0E0;cursor:pointer';el.onclick=()=>{if(b==='C'){cexpr='';cupd();return;}if(b==='='){try{cexpr=String(eval(cexpr.replace(/[^0-9.+*/()-]/g,'')));}catch(e){cexpr='Ошибка';}cupd();return;}cexpr+=b;cupd();};g.appendChild(el);});
   }
+  if(t==='logs'){const d=await api('/admin/api/worker_logs');v.innerHTML=`<div class="card"><table><tr><th>Время</th><th>Проверено</th><th>Алертов</th><th>Ошибок</th><th>Сообщение</th></tr>${d.slice().reverse().map(x=>`<tr><td>${new Date(x.ts*1000).toLocaleString()}</td><td>${x.checked}</td><td>${x.alerts}</td><td>${x.errors}</td><td>${x.message}</td></tr>`).join('')}</table>${d.length?'':'<div class="muted">Логов пока нет</div>'}</div>`;}
 }
 async function delUser(l){if(!confirm('Удалить '+l+'?'))return;await api('/admin/api/users/'+encodeURIComponent(l),{method:'DELETE'});toast('Удалено');render(current)}
 async function resetPw(l){const p=prompt('Новый пароль для '+l+':');if(!p)return;await api('/admin/api/users/'+encodeURIComponent(l)+'/reset_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});toast('Пароль изменён')}
@@ -996,6 +1000,58 @@ def admin_broadcast():
         if r.get("ok"):
             sent += 1
     return jsonify({"ok": True, "sent": sent, "total": total})
+
+
+@app.route("/worker_log", methods=["POST"])
+def worker_log():
+    g = None
+    expected = os.environ.get("WORKER_TOKEN", "").strip()
+    if expected and not hmac.compare_digest(expected, request.headers.get("X-Worker-Token", "")):
+        return unauthorized()
+    data = request.json or {}
+    with _lock:
+        logs = load_json(WORKER_LOG_FILE, []) or []
+        entry = {
+            "ts": int(time.time()),
+            "checked": int(data.get("checked") or 0),
+            "alerts": int(data.get("alerts") or 0),
+            "errors": int(data.get("errors") or 0),
+            "message": (data.get("message") or "").strip()[:300],
+        }
+        logs.append(entry)
+        logs = logs[-50:]
+        save_json(WORKER_LOG_FILE, logs)
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/api/worker_logs", methods=["GET"])
+def admin_worker_logs():
+    g = admin_guard()
+    if g:
+        return g
+    return jsonify(load_json(WORKER_LOG_FILE, []) or [])
+
+
+@app.route("/admin/api/run", methods=["POST"])
+def admin_run():
+    g = admin_guard()
+    if g:
+        return g
+    gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if not gh_token:
+        return jsonify({"ok": False, "error": "GITHUB_TOKEN не задан на сервере", "url": "https://github.com/yurevlive/wb_notification/actions/workflows/monitor.yml"}), 200
+    try:
+        r = requests.post(
+            "https://api.github.com/repos/yurevlive/wb_notification/actions/workflows/monitor.yml/dispatches",
+            json={"ref": "main"},
+            headers={"Authorization": "Bearer " + gh_token, "Accept": "application/vnd.github+json"},
+            timeout=15,
+        )
+        if r.status_code == 204:
+            return jsonify({"ok": True, "message": "Запуск отправлен в GitHub Actions"})
+        return jsonify({"ok": False, "error": "GitHub: HTTP %s" % r.status_code}), 200
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "error": repr(e)}), 200
 
 
 if __name__ == "__main__":
