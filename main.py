@@ -10,7 +10,7 @@ NET_TIMEOUT = 8
 
 # Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
 # сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.0.10"
 REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
 
 
@@ -71,24 +71,47 @@ def wb_open(page, sku):
 
 import re as _re
 
-def sku_from_text(text):
-    """Достаёт артикул из ссылки WB/Ozon или просто числа."""
+def parse_clipboard(text):
+    """Возвращает (артикул, цена_или_None, лимит_или_None) из текста/ссылки."""
     t = (text or "").strip()
     if not t:
-        return None
+        return None, None, None
+    sku = None
     m = _re.search(r"wildberries\\.ru/catalog/(\\d+)", t)
     if m:
-        return int(m.group(1))
-    m = _re.search(r"ozon\\.ru/product/[^/]*?(\\d{6,})", t)
-    if m:
-        return int(m.group(1))
-    m = _re.search(r"(\\d{6,})", t)
-    if m:
-        return int(m.group(1))
-    try:
-        return int(t)
-    except ValueError:
-        return None
+        sku = int(m.group(1))
+    if sku is None:
+        m = _re.search(r"ozon\\.ru/product/[^/]*?(\\d{6,})", t)
+        if m:
+            sku = int(m.group(1))
+    if sku is None:
+        nums = [int(x) for x in _re.findall(r"\\d{6,}", t)]
+        if nums:
+            sku = nums[0]
+    if sku is None:
+        try:
+            sku = int(t.split()[0])
+        except (ValueError, IndexError):
+            return None, None, None
+    price = None
+    limit = None
+    if "wildberries.ru" not in t and "ozon.ru" not in t:
+        nums = []
+        for part in t.split():
+            try:
+                nums.append(int(part))
+            except ValueError:
+                pass
+        if len(nums) >= 2:
+            price = nums[1]
+        if len(nums) >= 3:
+            limit = nums[2]
+    return sku, price, limit
+
+
+def sku_from_text(text):
+    s, _, _ = parse_clipboard(text)
+    return s
 
 
 def fetch_wb(sku):
@@ -402,11 +425,15 @@ def main(page: ft.Page):
             txt = await page.get_clipboard_async()
         except Exception:
             txt = ""
-        sku = sku_from_text(txt or "")
+        sku, price, limit = parse_clipboard(txt or "")
         if sku:
             sku_in.value = str(sku)
+            if price:
+                pr_in.value = str(price)
+            if limit:
+                lim_in.value = str(limit)
             page.update()
-            snack = ft.SnackBar(content=ft.Text(f"Артикул {sku} вставлен", color="white"), bgcolor="#1B5E20")
+            snack = ft.SnackBar(content=ft.Text(f"Артикул {sku}" + (f", цена {price}" if price else "") + " вставлен", color="white"), bgcolor="#1B5E20")
             page.overlay.append(snack); snack.open = True; page.update()
         else:
             snack = ft.SnackBar(content=ft.Text("В буфере нет ссылки WB/Ozon", color="white"), bgcolor="#B00020")
@@ -415,9 +442,13 @@ def main(page: ft.Page):
     paste_btn = ft.IconButton(icon=ft.Icons.CONTENT_PASTE_ROUNDED, icon_color=P1, tooltip="Вставить ссылку из буфера", on_click=lambda e: bg(paste_link))
 
     def on_route_change(e):
-        sku = sku_from_text(getattr(page, "route", "") or "")
+        sku, price, limit = parse_clipboard(getattr(page, "route", "") or "")
         if sku:
             sku_in.value = str(sku)
+            if price:
+                pr_in.value = str(price)
+            if limit:
+                lim_in.value = str(limit)
             page.update()
             snack = ft.SnackBar(content=ft.Text(f"Артикул {sku} из ссылки", color="white"), bgcolor="#1B5E20")
             page.overlay.append(snack); snack.open = True; page.update()
@@ -429,19 +460,23 @@ def main(page: ft.Page):
             txt = page.get_clipboard() or ""
         except Exception:
             txt = ""
-        sku = sku_from_text(txt)
+        sku, price, limit = parse_clipboard(txt)
         if not sku:
             return
         key = str(sku)
         if st.get("last_clip") == key:
             return
         st["last_clip"] = key
-        # не перезаписывать, если пользователь уже ввёл артикул
         if sku_in.value and sku_in.value.strip():
             return
         sku_in.value = key
+        if price and not pr_in.value.strip():
+            pr_in.value = str(price)
+        if limit and not lim_in.value.strip():
+            lim_in.value = str(limit)
         page.update()
-        snack = ft.SnackBar(content=ft.Text(f"В буфере артикул {sku} — введите цену и добавьте", color="white"), bgcolor="#1B5E20", duration=6000)
+        msg = f"Артикул {sku}" + (f", цена {price}" if price else "") + " — проверь и добавь"
+        snack = ft.SnackBar(content=ft.Text(msg, color="white"), bgcolor="#1B5E20", duration=6000)
         page.overlay.append(snack)
         snack.open = True
         page.update()
@@ -522,15 +557,19 @@ def main(page: ft.Page):
     def add(e):
         if st["busy"] or not sku_in.value or not pr_in.value:
             return
-        sku = sku_from_text(sku_in.value)
+        sku, p, l = parse_clipboard(sku_in.value)
         if not sku:
             snack = ft.SnackBar(content=ft.Text("Не нашёл артикул в тексте", color="white"), bgcolor="#B00020")
             page.overlay.append(snack); snack.open = True; page.update(); return
         try:
-            tgt, lim = int(pr_in.value.strip()), int(lim_in.value.strip() or 1)
+            tgt = int(pr_in.value.strip()) if pr_in.value.strip() else (p or 0)
+            if tgt <= 0:
+                snack = ft.SnackBar(content=ft.Text("Укажи цену", color="white"), bgcolor="#B00020")
+                page.overlay.append(snack); snack.open = True; page.update(); return
+            lim = int(lim_in.value.strip() or 1) if lim_in.value.strip() else (l or 1)
         except ValueError:
             return
-        sku_in.value, pr_in.value = "", ""
+        sku_in.value, pr_in.value, lim_in.value = "", "", ""
         busy(True, "Добавление...")
         bg(_add_request, sku, tgt, lim)
 
