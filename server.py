@@ -814,6 +814,7 @@ input,textarea{background:#1E1E2A;color:#E0E0E0;border:1px solid #2A2A38;border-
 <button class="tab" data-t="users">Пользователи</button>
 <button class="tab" data-t="tasks">Задачи</button>
 <button class="tab" data-t="broadcast">Рассылка</button>
+<button class="tab" data-t="calc">Калькулятор</button>
 </div>
 <div id="view"></div>
 </main><div id="toast"></div>
@@ -833,6 +834,16 @@ async function render(t){current=t;const v=document.getElementById('view');v.inn
   if(t==='users'){const d=await api('/admin/api/users');v.innerHTML=`<div class="card"><table><tr><th>Логин</th><th>TG id</th><th>Токен</th><th>Действия</th></tr>${d.map(u=>`<tr><td>${u.login}</td><td>${u.tg_id||'—'}</td><td>${u.has_token?'да':'нет'}</td><td><button class="danger" onclick="delUser('${u.login}')">Удалить</button> <button onclick="resetPw('${u.login}')">Сбросить пароль</button></td></tr>`).join('')}</table></div>`;}
   if(t==='tasks'){const d=await api('/admin/api/tasks');v.innerHTML=`<div class="card"><table><tr><th>Владелец</th><th>Артикул</th><th>Цена</th><th>Цель</th><th>Куплено</th><th></th></tr>${d.map(t=>`<tr><td>${t.owner}</td><td>${t.sku}</td><td>${t.current_sbp||'—'}</td><td>${t.target_price}</td><td>${t.bought}/${t.limit}</td><td><button class="danger" onclick="delTask('${t.owner}',${t.sku})">Удалить</button></td></tr>`).join('')}</table></div>`;}
   if(t==='broadcast'){v.innerHTML=`<div class="card"><textarea id="btext" rows="4" placeholder="Текст сообщения всем пользователям"></textarea><div style="margin-top:8px"><button class="primary" onclick="broadcast()">Отправить</button></div><div class="muted" id="bres"></div></div>`;}
+  if(t==='calc'){v.innerHTML=`<div class="card"><h3 style="margin:0 0 8px">Калькулятор цен WB</h3><div class="row"><input id="base" type="number" placeholder="Базовая цена, ₽ (из price-history)" style="flex:1"><button class="primary" onclick="conv()">Посчитать</button></div><div id="convres" class="muted" style="margin-top:8px"></div></div><div class="card"><h3 style="margin:0 0 8px">Калькулятор</h3><div id="calcdisp" style="background:#1E1E2A;padding:12px;border-radius:8px;font-size:24px;text-align:right;margin-bottom:8px;min-height:36px">0</div><div id="calcgrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px"></div></div>`;
+    // price converter
+    window.conv=function(){const b=parseFloat(document.getElementById('base').value);if(!b||b<=0){document.getElementById('convres').textContent='Введите базовую цену';return;}const w=Math.round(b*426/395);const s=Math.round(b*454/395);document.getElementById('convres').innerHTML='Кошелёк: <b>'+w+' ₽</b> &nbsp; СБП: <b>'+s+' ₽</b><br><span class="muted">База '+b+' ₽ × 426/395 и × 454/395</span>';};
+    // simple calculator
+    let cexpr='';const disp=document.getElementById('calcdisp');
+    function cupd(){disp.textContent=cexpr||'0';}
+    const btns=['7','8','9','/','4','5','6','*','1','2','3','-','0','.','=','+','C'];
+    const g=document.getElementById('calcgrid');
+    btns.forEach(b=>{const el=document.createElement('button');el.textContent=b;el.style.cssText='padding:12px;font-size:18px;border:none;border-radius:8px;background:#2A2A38;color:#E0E0E0;cursor:pointer';el.onclick=()=>{if(b==='C'){cexpr='';cupd();return;}if(b==='='){try{cexpr=String(eval(cexpr.replace(/[^0-9.+\\-*/()]/g,'')));}catch(e){cexpr='Ошибка';}cupd();return;}cexpr+=b;cupd();};g.appendChild(el);});
+  }
 }
 async function delUser(l){if(!confirm('Удалить '+l+'?'))return;await api('/admin/api/users/'+encodeURIComponent(l),{method:'DELETE'});toast('Удалено');render(current)}
 async function resetPw(l){const p=prompt('Новый пароль для '+l+':');if(!p)return;await api('/admin/api/users/'+encodeURIComponent(l)+'/reset_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});toast('Пароль изменён')}
