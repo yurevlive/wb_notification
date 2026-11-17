@@ -10,7 +10,7 @@ NET_TIMEOUT = 8
 
 # Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
 # сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
 
 
@@ -128,7 +128,7 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG
     page.bgcolor = BG
-    st = {"tasks": [], "user": "", "token": "", "reg": False, "tg_mode": False, "q": "", "busy": False, "alerted_shown": False}
+    st = {"tasks": [], "user": "", "token": "", "reg": False, "tg_mode": False, "q": "", "busy": False, "alerted_shown": False, "last_clip": ""}
 
     def bg(fn, *args):
         """Сеть — только в фоне, иначе UI замирает чёрным экраном."""
@@ -423,6 +423,36 @@ def main(page: ft.Page):
             page.overlay.append(snack); snack.open = True; page.update()
 
     page.on_route_change = on_route_change
+
+    def check_clipboard():
+        try:
+            txt = page.get_clipboard() or ""
+        except Exception:
+            txt = ""
+        sku = sku_from_text(txt)
+        if not sku:
+            return
+        key = str(sku)
+        if st.get("last_clip") == key:
+            return
+        st["last_clip"] = key
+        # не перезаписывать, если пользователь уже ввёл артикул
+        if sku_in.value and sku_in.value.strip():
+            return
+        sku_in.value = key
+        page.update()
+        snack = ft.SnackBar(content=ft.Text(f"В буфере артикул {sku} — введите цену и добавьте", color="white"), bgcolor="#1B5E20", duration=6000)
+        page.overlay.append(snack)
+        snack.open = True
+        page.update()
+
+    def on_lifecycle(e):
+        if getattr(e, "state", None) == ft.AppLifecycleState.RESUME:
+            check_clipboard()
+
+    page.on_app_lifecycle_state_change = on_lifecycle
+    # проверить буфер при старте
+    bg(check_clipboard)
     col = ft.Column(spacing=10)
     empty = ft.Container(visible=False, padding=40, content=ft.Column([ft.Icon(ft.Icons.INBOX_ROUNDED, size=56, color="#3A3A48"), ft.Text("Пока пусто", size=16, weight="bold", color="#8A8A94"), ft.Text("Добавьте артикул и цену — начнём следить", size=12, color="#5A5A66")], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6))
 
