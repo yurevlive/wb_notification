@@ -651,8 +651,14 @@ def main(page: ft.Page):
 
     # первый экран уже нарисован — только теперь идём в сеть
     bg(check_update)
-    saved = page.client_storage.get("wb_u") or ""
-    saved_token = page.client_storage.get("wb_token") or ""
+    try:
+        saved = page.client_storage.get("wb_u") or ""
+    except Exception:
+        saved = ""
+    try:
+        saved_token = page.client_storage.get("wb_token") or ""
+    except Exception:
+        saved_token = ""
     if saved:
         enter(saved, saved_token)
         load()
