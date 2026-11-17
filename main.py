@@ -99,7 +99,7 @@ def main(page: ft.Page):
     tg_in = ft.TextField(hint_text="Числовой Telegram ID", border_radius=12, filled=True, bgcolor=CARD, visible=False)
     rem = ft.Checkbox(label="Запомнить меня", value=True, active_color=P1)
     # --- Telegram-вход ---
-    tg_id_in = ft.TextField(hint_text="Ваш Telegram (@username или ID)", border_radius=12, filled=True, bgcolor=CARD)
+    tg_id_in = ft.TextField(hint_text="Ваш Telegram ID (числовой, узнать: @userinfobot)", border_radius=12, filled=True, bgcolor=CARD)
     code_in = ft.TextField(hint_text="Код из Telegram", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, visible=False)
     send_btn = ft.ElevatedButton(content=ft.Text("Отправить код", color="white", weight="bold"), bgcolor=P1, height=46)
     verify_btn = ft.ElevatedButton(content=ft.Text("Войти по коду", color="white", weight="bold"), bgcolor=P1, height=46, visible=False)
@@ -204,7 +204,7 @@ def main(page: ft.Page):
                 verify_btn.visible = True
                 send_btn.content = ft.Text("Отправить код повторно", color="white", weight="bold")
                 if data.get("sent") is False:
-                    a_err.value = "Код не отправлен: " + (data.get("send_error") or "ошибка")
+                    a_err.value = data.get("error") or ("Код не отправлен: " + (data.get("send_error") or "ошибка"))
                     a_err.color = DANGER
                 else:
                     a_err.value = "Код отправлен. Проверьте Telegram."
