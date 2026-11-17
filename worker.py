@@ -300,9 +300,12 @@ def check_prices(state):
     tasks = api_tasks()
     if not tasks:
         log("Задач нет — проверять нечего")
-        return False
+        return False, 0, 0, 0
 
     changed = False
+    checked = 0
+    alerts = 0
+    errors = 0
     for t in tasks:
         try:
             sku = int(t["sku"])
@@ -313,12 +316,23 @@ def check_prices(state):
 
         limit = int(t.get("limit") or 1)
         bought = max(int(t.get("bought") or 0), int(state["bought"].get(str(sku), 0)))
-        name, wallet, sbp, image = fetch_product(sku)
+        name, wallet, sbp, image = None, None, None, None
+        for attempt in range(3):
+            try:
+                name, wallet, sbp, image = fetch_product(sku)
+                break
+            except Exception as e:
+                log("[%d] попытка %d/3 не удалась: %r" % (sku, attempt + 1, e))
+                time.sleep(2 ** attempt)
+        if sbp is None:
+            log("[%d] НЕ УДАЛОСЬ получить цену (проверь сеть/CAPTCHA)" % sku)
         log("[%d] %s: СБП %s ₽ | Кошелёк %s ₽ (цель <= %d ₽, %d/%d)"
-            % (sku, name, sbp, wallet, target, bought, limit))
+            % (sku, name or ("Товар %d" % sku), sbp, wallet, target, bought, limit))
 
         if sbp is None:
+            errors += 1
             continue
+        checked += 1
 
         if PUSH_PRICES:
             api_post_task({
@@ -351,22 +365,40 @@ def check_prices(state):
         ) % (name, sku, sbp, wallet, target, bought + 1, limit, product_url(sku)))
         if not sent:
             continue
+        alerts += 1
         state["bought"][str(sku)] = bought + 1
         state["alerted"][str(sku)] = sbp
         changed = True
         time.sleep(1)
 
-    return changed
+    return changed, checked, alerts, errors
 
 
 def run_cycle():
     state = load_state()
     changed = poll_telegram(state)
-    changed = check_prices(state) or changed
+    res = check_prices(state)
+    if isinstance(res, tuple):
+        c_changed, checked, alerts, errors = res
+    else:
+        c_changed, checked, alerts, errors = res, 0, 0, 0
+    changed = c_changed or changed
     if changed:
         save_state(state)
     else:
         log("Состояние не изменилось")
+    # лог на сервер для админки
+    try:
+        headers = {}
+        token = os.environ.get("WORKER_TOKEN", "").strip()
+        if token:
+            headers["X-Worker-Token"] = token
+        requests.post(API_BASE + "/worker_log", json={
+            "checked": checked, "alerts": alerts, "errors": errors,
+            "message": "проверено %d, алертов %d, ошибок %d" % (checked, alerts, errors),
+        }, headers=headers, timeout=10)
+    except Exception as e:
+        log("Не смог записать worker_log: %r" % e)
     return 0
 
 
