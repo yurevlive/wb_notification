@@ -818,11 +818,13 @@ input,textarea{background:#1E1E2A;color:#E0E0E0;border:1px solid #2A2A38;border-
 <div id="view"></div>
 </main><div id="toast"></div>
 <script>
-const TOKEN = localStorage.getItem('admin_token') || prompt('ADMIN_TOKEN:');
+const urlToken = new URLSearchParams(location.search).get('token');
+const TOKEN = urlToken || localStorage.getItem('admin_token') || prompt('ADMIN_TOKEN:');
 if (TOKEN) localStorage.setItem('admin_token', TOKEN);
+if (urlToken) { history.replaceState({}, '', location.pathname); }
 const H = {'X-Admin-Token': TOKEN||''};
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
-async function api(path, opts={}){const r=await fetch(path,{...opts,headers:{...H,...(opts.headers||{})}});if(!r.ok){toast('Ошибка '+r.status);throw new Error(r.status)}return r.json()}
+async function api(path, opts={}){const r=await fetch(path,{...opts,headers:{...H,...(opts.headers||{})}});if(r.status===401){localStorage.removeItem('admin_token');toast('Неверный токен (401)');const nt=prompt('ADMIN_TOKEN:');if(nt){localStorage.setItem('admin_token',nt);location.reload()}throw new Error(401)}if(!r.ok){toast('Ошибка '+r.status);throw new Error(r.status)}return r.json()}
 function showTab(t){document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.t===t));render(t)}
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.t)));
 let current='overview';
