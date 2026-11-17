@@ -90,6 +90,22 @@ def send_tg(chat_id, text):
         return False
 
 
+def api_register_contact(username, tg_id, name=""):
+    """Говорит серверу, что @username = этот id, чтобы вход работал по логину."""
+    if DRY_RUN:
+        return True
+    headers = {}
+    token = os.environ.get("WORKER_TOKEN", "").strip()
+    if token:
+        headers["X-Worker-Token"] = token
+    try:
+        r = requests.post(API_BASE + "/tg_contact", json={"username": username, "id": str(tg_id), "name": name}, headers=headers, timeout=20)
+        return r.status_code == 200
+    except requests.RequestException as e:
+        log("POST /tg_contact: %s" % e)
+        return False
+
+
 def poll_telegram(state):
     if not TG_TOKEN:
         log("TG_TOKEN не задан — команды бота не разбираются")
@@ -112,7 +128,11 @@ def poll_telegram(state):
         msg = upd.get("message") or {}
         text = (msg.get("text") or "").strip()
         chat = msg.get("chat") or {}
-        if not text or not chat.get("id"):
+        if not chat.get("id"):
+            continue
+        if chat.get("type") == "private" and chat.get("username"):
+            api_register_contact(chat["username"], chat["id"], chat.get("first_name") or "")
+        if not text:
             continue
         try:
             handle_command(str(chat["id"]), text, state)

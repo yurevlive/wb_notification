@@ -6,6 +6,8 @@
 # данные и сборка
 tasks.json
 users.json
+codes.json
+contacts.json
 build/
 dist/
 *.apk
