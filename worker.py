@@ -130,6 +130,9 @@ def poll_telegram(state):
     changed = False
     try:
         r = requests.get(tg_url("getUpdates"), params={"offset": offset, "timeout": TG_POLL_TIMEOUT}, timeout=TG_POLL_TIMEOUT + 15)
+        if r.status_code == 409:
+            log("webhook включён — команды бота обрабатывает сервер")
+            return False
         if r.status_code != 200:
             log("getUpdates: HTTP %s" % r.status_code)
             return False

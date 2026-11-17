@@ -66,6 +66,7 @@ _load_dotenv()
 REQUIRE_TOKEN = os.environ.get("REQUIRE_TOKEN", "").lower() in ("1", "true", "yes")
 TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
 BOT_LINK = os.environ.get("BOT_LINK") or "@wb_jekich_bot"
+TG_SECRET = os.environ.get("TG_WEBHOOK_SECRET", "").strip()
 
 
 # ------------------------------------------------------------------ хранилище
@@ -212,16 +213,76 @@ def resolve_chat(raw):
     return "", uname, "Аккаунт @%s ещё не открывал бота. Откройте %s в Telegram, нажмите Start и повторите." % (handle, BOT_LINK)
 
 
-def send_tg(chat_id, text):
+def send_tg(chat_id, text, markup=None):
     if not TG_TOKEN:
         return {"ok": False, "error": "TG_TOKEN empty on server"}
+    payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+    if markup:
+        payload["reply_markup"] = markup
     try:
-        r = requests.post(tg_url("sendMessage"), json={"chat_id": chat_id, "text": text}, timeout=10)
+        r = requests.post(tg_url("sendMessage"), json=payload, timeout=10)
         if r.status_code != 200:
             return {"ok": False, "error": "HTTP %s: %s" % (r.status_code, r.text[:200])}
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": repr(e)}
+
+
+HELP_TEXT = (
+    "🤖 WB.Track\n"
+    "Отправьте: АРТИКУЛ ЦЕНА [КОЛИЧЕСТВО]\n"
+    "Пример: 596432419 420\n\n"
+    "/list — задачи\n"
+    "/del АРТИКУЛ — удалить"
+)
+
+
+def _tg_tasks(owner="telegram"):
+    tasks = load_json(DATA_FILE, [])
+    return [t for t in tasks if (t.get("owner") or "default") == owner]
+
+
+def _tg_list(owner):
+    tasks = _tg_tasks(owner)
+    if not tasks:
+        return "📭 Список пуст."
+    lines = ["📋 Задачи:"]
+    for t in tasks:
+        cur = ("%s ₽" % t["current_sbp"]) if t.get("current_sbp") else "—"
+        lines.append("%s (арт. %s)\nСейчас: %s | Цель: до %s ₽ | %d/%d"
+                     % (t.get("name") or t["sku"], t["sku"], cur, t["target_price"],
+                        int(t.get("bought") or 0), int(t.get("limit") or 1)))
+    return "\n\n".join(lines)
+
+
+def _tg_add(owner, text):
+    nums = [int(p) for p in text.replace(",", " ").split() if p.strip().isdigit()]
+    if len(nums) < 2:
+        return "⚠️ Формат: АРТИКУЛ ЦЕНА (например: 596432419 420)"
+    sku, price = nums[0], nums[1]
+    limit = max(1, nums[2]) if len(nums) > 2 else 1
+    with _lock:
+        tasks = load_json(DATA_FILE, [])
+        prev = next((t for t in tasks if (t.get("owner") or "default") == owner and int(t["sku"]) == sku), None)
+        task = normalize_task({"owner": owner, "sku": sku, "target_price": price, "limit": limit}, prev)
+        tasks = [t for t in tasks if not ((t.get("owner") or "default") == owner and int(t["sku"]) == sku)]
+        tasks.append(task)
+        save_json(DATA_FILE, tasks)
+    return "✅ Добавлено: %s\nЦель: до %s ₽ | Кол-во: %d" % (task["name"], price, limit)
+
+
+def _tg_del(owner, text):
+    nums = [int(p) for p in text.replace(",", " ").split() if p.strip().isdigit()]
+    if not nums:
+        return "⚠️ Формат: /del АРТИКУЛ"
+    sku = nums[0]
+    with _lock:
+        tasks = load_json(DATA_FILE, [])
+        left = [t for t in tasks if not ((t.get("owner") or "default") == owner and int(t["sku"]) == sku)]
+        if len(left) == len(tasks):
+            return "🤷 Нет задачи с артикулом %s" % sku
+        save_json(DATA_FILE, left)
+    return "🗑 Удалено: %s" % sku
 
 
 def new_token():
@@ -425,6 +486,22 @@ def issue_token(tg_key, tg_id):
     return user["token"], login
 
 
+def _complete_login(nonce, cid, chat):
+    """Привязывает ожидающий вход к telegram-id и запоминает username."""
+    uname = (chat.get("username") or "").strip().lower()
+    with _lock:
+        if nonce:
+            logins = load_json(LOGINS_FILE, {})
+            entry = logins.get(nonce) or {"created": int(time.time())}
+            entry.update({"id": str(cid), "username": uname})
+            logins[nonce] = entry
+            save_json(LOGINS_FILE, logins)
+        if uname:
+            contacts = load_json(CONTACTS_FILE, {}) or {}
+            contacts[uname] = {"id": str(cid), "name": chat.get("first_name") or ""}
+            _save_contacts(contacts)
+
+
 @app.route("/start_login", methods=["POST"])
 def start_login():
     """Приложение просит nonce, открывает бота и ждёт /poll_login."""
@@ -467,6 +544,43 @@ def poll_login():
     tg_key = entry.get("username") or str(entry["id"])
     token, login = issue_token(tg_key, entry["id"])
     return jsonify({"ok": True, "login": login, "token": token, "tg_id": entry.get("username") or entry["id"]})
+
+
+@app.route("/tg_hook_8f3ka9qz", methods=["POST"])
+def tg_webhook():
+    """Сюда Telegram присылает сообщения бота — ответ мгновенный, без cron."""
+    if TG_SECRET:
+        got = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(got, TG_SECRET):
+            return "", 403
+    upd = request.json or {}
+    msg = upd.get("message") or upd.get("edited_message") or {}
+    chat = msg.get("chat") or {}
+    text = (msg.get("text") or "").strip()
+    cid = chat.get("id")
+    if not cid:
+        return jsonify({"ok": True})
+    if chat.get("type") == "private" and chat.get("username"):
+        with _lock:
+            contacts = load_json(CONTACTS_FILE, {}) or {}
+            contacts[chat["username"].strip().lower()] = {"id": str(cid), "name": chat.get("first_name") or ""}
+            _save_contacts(contacts)
+    parts = text.split()
+    cmd = parts[0].lower().split("@")[0] if parts else ""
+    owner = "telegram"
+    if cmd == "/start":
+        if len(parts) >= 2:
+            _complete_login(parts[1], cid, chat)
+        send_tg(cid, HELP_TEXT)
+    elif cmd == "/help":
+        send_tg(cid, HELP_TEXT)
+    elif cmd == "/list":
+        send_tg(cid, _tg_list(owner))
+    elif cmd == "/del":
+        send_tg(cid, _tg_del(owner, text))
+    elif text:
+        send_tg(cid, _tg_add(owner, text))
+    return jsonify({"ok": True})
 
 
 @app.route("/tg_start", methods=["POST"])
