@@ -106,6 +106,22 @@ def api_register_contact(username, tg_id, name=""):
         return False
 
 
+def api_start_login(nonce, tg_id, username="", name=""):
+    """Сообщает серверу, что человек нажал Start по deep-link (вход без кода)."""
+    if DRY_RUN:
+        return True
+    headers = {}
+    token = os.environ.get("WORKER_TOKEN", "").strip()
+    if token:
+        headers["X-Worker-Token"] = token
+    try:
+        r = requests.post(API_BASE + "/tg_start", json={"nonce": nonce, "id": str(tg_id), "username": username, "name": name}, headers=headers, timeout=20)
+        return r.status_code == 200
+    except requests.RequestException as e:
+        log("POST /tg_start: %s" % e)
+        return False
+
+
 def poll_telegram(state):
     if not TG_TOKEN:
         log("TG_TOKEN не задан — команды бота не разбираются")
@@ -134,6 +150,9 @@ def poll_telegram(state):
             api_register_contact(chat["username"], chat["id"], chat.get("first_name") or "")
         if not text:
             continue
+        parts = text.split()
+        if len(parts) >= 2 and parts[0].lower().split("@")[0] == "/start":
+            api_start_login(parts[1], chat["id"], chat.get("username") or "", chat.get("first_name") or "")
         try:
             handle_command(str(chat["id"]), text, state)
         except Exception as e:  # одна плохая команда не должна валить запуск
