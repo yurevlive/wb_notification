@@ -29,6 +29,7 @@ DATA_FILE = os.environ.get("TASKS_FILE") or os.path.join(HERE, "tasks.json")
 USERS_FILE = os.environ.get("USERS_FILE") or os.path.join(HERE, "users.json")
 CODES_FILE = os.environ.get("CODES_FILE") or os.path.join(HERE, "codes.json")
 CONTACTS_FILE = os.environ.get("CONTACTS_FILE") or os.path.join(HERE, "contacts.json")
+LOGINS_FILE = os.environ.get("LOGINS_FILE") or os.path.join(HERE, "logins.json")
 CODE_TTL = 300
 S = "/"
 
@@ -122,17 +123,37 @@ def _username_by_id(contacts, cid):
     return ""
 
 
-def peek_contacts():
-    """Запоминает username -> id из неподтверждённых апдейтов (offset не двигаем)."""
+def peek_updates():
+    """Неподтверждённые апдейты бота (offset не двигаем, воркер не страдает)."""
     if not TG_TOKEN:
-        return {}
+        return []
     try:
         r = requests.get(tg_url("getUpdates"), params={"limit": 100, "timeout": 0}, timeout=10)
         payload = r.json()
     except Exception:
-        return {}
+        return []
+    return (payload.get("result") or []) if isinstance(payload, dict) else []
+
+
+def peek_start_nonces():
+    """nonce из '/start <nonce>' -> {id, username}."""
     found = {}
-    for upd in (payload.get("result") or []) if isinstance(payload, dict) else []:
+    for upd in peek_updates():
+        msg = upd.get("message") or {}
+        chat = msg.get("chat") or {}
+        text = (msg.get("text") or "").strip()
+        if chat.get("type") != "private" or not chat.get("id"):
+            continue
+        parts = text.split()
+        if len(parts) >= 2 and parts[0].lower().split("@")[0] == "/start":
+            found[parts[1]] = {"id": str(chat["id"]), "username": (chat.get("username") or "").strip().lower()}
+    return found
+
+
+def peek_contacts():
+    """Запоминает username -> id из неподтверждённых апдейтов (offset не двигаем)."""
+    found = {}
+    for upd in peek_updates():
         msg = upd.get("message") or upd.get("edited_message") or upd.get("my_chat_member") or {}
         chat = msg.get("chat") or {}
         if chat.get("type") != "private":
@@ -387,6 +408,92 @@ def tg_contact():
     return jsonify({"ok": True})
 
 
+def issue_token(tg_key, tg_id):
+    """Создаёт/возвращает аккаунт и токен для telegram-пользователя."""
+    login = "tg_" + tg_key
+    with _lock:
+        users = load_json(USERS_FILE, {})
+        user = users.get(login)
+        if user is None:
+            user = {"password": hash_pw(secrets.token_hex(16)), "tg_id": tg_id, "token": new_token()}
+            users[login] = user
+        else:
+            if not user.get("token"):
+                user["token"] = new_token()
+            user["tg_id"] = tg_id
+        save_json(USERS_FILE, users)
+    return user["token"], login
+
+
+@app.route("/start_login", methods=["POST"])
+def start_login():
+    """Приложение просит nonce, открывает бота и ждёт /poll_login."""
+    nonce = secrets.token_urlsafe(9)
+    now = int(time.time())
+    with _lock:
+        logins = load_json(LOGINS_FILE, {})
+        logins = {k: v for k, v in logins.items() if now - int(v.get("created", 0)) < 900}
+        logins[nonce] = {"created": now}
+        save_json(LOGINS_FILE, logins)
+    return jsonify({"ok": True, "nonce": nonce, "bot": BOT_LINK, "url": "https://t.me/%s?start=%s" % (BOT_LINK.lstrip("@"), nonce)})
+
+
+@app.route("/poll_login", methods=["GET"])
+def poll_login():
+    """Ждём, пока человек нажмёт Start в боте. Тогда сразу вход без кода."""
+    nonce = (request.args.get("nonce") or "").strip()
+    if not nonce:
+        return jsonify({"ok": False, "error": "nonce required"}), 400
+    now = int(time.time())
+    with _lock:
+        entry = load_json(LOGINS_FILE, {}).get(nonce)
+    if not entry or now - int(entry.get("created", 0)) > 900:
+        return jsonify({"ok": False, "error": "expired"}), 400
+    if not entry.get("id"):
+        found = peek_start_nonces().get(nonce)
+        if found:
+            entry.update(found)
+            with _lock:
+                logins = load_json(LOGINS_FILE, {})
+                logins[nonce] = entry
+                save_json(LOGINS_FILE, logins)
+            if found.get("username"):
+                with _lock:
+                    contacts = load_json(CONTACTS_FILE, {}) or {}
+                    contacts[found["username"]] = {"id": found["id"], "name": ""}
+                    _save_contacts(contacts)
+    if not entry.get("id"):
+        return jsonify({"ok": False, "pending": True})
+    tg_key = entry.get("username") or str(entry["id"])
+    token, login = issue_token(tg_key, entry["id"])
+    return jsonify({"ok": True, "login": login, "token": token, "tg_id": entry.get("username") or entry["id"]})
+
+
+@app.route("/tg_start", methods=["POST"])
+def tg_start():
+    """Воркер увидел '/start <nonce>' — закрываем ожидающий вход."""
+    expected = os.environ.get("WORKER_TOKEN", "").strip()
+    if expected and not hmac.compare_digest(expected, request.headers.get("X-Worker-Token", "")):
+        return unauthorized()
+    data = request.json or {}
+    nonce = (data.get("nonce") or "").strip()
+    cid = str(data.get("id") or "").strip()
+    if not nonce or not cid:
+        return jsonify({"ok": False, "error": "nonce and id are required"}), 400
+    uname = (data.get("username") or "").strip().lower().lstrip("@")
+    with _lock:
+        logins = load_json(LOGINS_FILE, {})
+        entry = logins.get(nonce) or {"created": int(time.time())}
+        entry.update({"id": cid, "username": uname})
+        logins[nonce] = entry
+        save_json(LOGINS_FILE, logins)
+        if uname:
+            contacts = load_json(CONTACTS_FILE, {}) or {}
+            contacts[uname] = {"id": cid, "name": (data.get("name") or "").strip()}
+            _save_contacts(contacts)
+    return jsonify({"ok": True})
+
+
 @app.route("/verify_code", methods=["POST"])
 def verify_code():
     data = request.json or {}
@@ -412,18 +519,9 @@ def verify_code():
         for k in keys:
             codes.pop(k, None)
         save_json(CODES_FILE, codes)
-    login = "tg_" + keys[0]
-    with _lock:
-        users = load_json(USERS_FILE, {})
-        if login not in users:
-            users[login] = {"password": hash_pw(secrets.token_hex(16)), "tg_id": key, "token": new_token()}
-        else:
-            if not users[login].get("token"):
-                users[login]["token"] = new_token()
-            users[login]["tg_id"] = key
-        save_json(USERS_FILE, users)
-        token = users[login]["token"]
-    return jsonify({"ok": True, "login": login, "tg_id": key, "token": token})
+    login_key = keys[0]
+    token, login = issue_token(login_key, key)
+    return jsonify({"ok": True, "login": login, "tg_id": login_key, "token": token})
 
 
 @app.route("/tasks", methods=["GET"])

@@ -1,5 +1,6 @@
 import flet as ft
 import requests
+import time
 
 S = chr(47)
 API = "".join(["ht", "tps:", S, S, "yurevlive.", "pythonanywhere.", "com"])
@@ -102,6 +103,8 @@ def main(page: ft.Page):
     tg_id_in = ft.TextField(hint_text="Логин Telegram, например @yurev0", border_radius=12, filled=True, bgcolor=CARD)
     code_in = ft.TextField(hint_text="Код из Telegram", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, visible=False)
     send_btn = ft.ElevatedButton(content=ft.Text("Отправить код", color="white", weight="bold"), bgcolor=P1, height=46)
+    tg_btn_txt = ft.Text("Войти через Telegram (1 касание)", color="white", weight="bold")
+    tg_login_btn = ft.ElevatedButton(content=tg_btn_txt, bgcolor=P1, height=50)
     verify_btn = ft.ElevatedButton(content=ft.Text("Войти по коду", color="white", weight="bold"), bgcolor=P1, height=46, visible=False)
     mode_txt = ft.Text("Обычный вход", size=13, color=P1)
     a_err = ft.Text("", size=13, color="#FF5252")
@@ -256,6 +259,56 @@ def main(page: ft.Page):
             a_err.value = err
             page.update()
 
+    def start_tg_login(e):
+        a_err.value, a_err.color = "", DANGER
+        tg_login_btn.disabled = True
+        tg_login_btn.content = ft.Text("Открываю Telegram...", color="white", weight="bold")
+        page.update()
+        bg(_start_tg_login)
+
+    def _start_tg_login():
+        nonce, link, err = "", "", ""
+        try:
+            r = requests.post(API + S + "start_login", json={}, timeout=NET_TIMEOUT)
+            d = r.json()
+            if d.get("ok"):
+                nonce = d.get("nonce") or ""
+                link = d.get("url") or ""
+            else:
+                err = d.get("error") or "Ошибка сервера"
+        except (requests.RequestException, ValueError):
+            err = "Сервер недоступен"
+        if not nonce:
+            tg_login_btn.disabled = False
+            tg_login_btn.content = tg_btn_txt
+            a_err.value = err or "Не удалось начать вход"
+            page.update()
+            return
+        try:
+            page.launch_url(link)
+        except Exception:
+            pass
+        a_err.value, a_err.color = "Нажмите Start в Telegram — вход произойдёт сам", OK
+        page.update()
+        for _ in range(75):
+            time.sleep(2)
+            try:
+                r = requests.get(API + S + "poll_login", params={"nonce": nonce}, timeout=NET_TIMEOUT)
+                d = r.json()
+            except (requests.RequestException, ValueError):
+                continue
+            if d.get("ok") and d.get("token"):
+                if rem.value:
+                    page.client_storage.set("wb_u", d["login"])
+                    page.client_storage.set("wb_token", d["token"])
+                enter(d["login"], d["token"])
+                load()
+                return
+        tg_login_btn.disabled = False
+        tg_login_btn.content = tg_btn_txt
+        a_err.value, a_err.color = "Время ожидания истекло. Нажмите кнопку ещё раз.", DANGER
+        page.update()
+
     def toggle_mode(e):
         st["tg_mode"] = not st["tg_mode"]
         regular_box.visible = not st["tg_mode"]
@@ -265,6 +318,7 @@ def main(page: ft.Page):
         page.update()
 
     send_btn.on_click = request_code
+    tg_login_btn.on_click = start_tg_login
     verify_btn.on_click = verify_code
     mode_txt.on_click = toggle_mode
 
@@ -272,7 +326,7 @@ def main(page: ft.Page):
 
     regular_box = ft.Container(content=ft.Column([a_t, u_in, p_in, tg_in, rem, a_err, ft.Container(content=auth_btn, expand=True)], spacing=10), visible=True)
     bot_hint = ft.TextButton(content=ft.Text("Нет кода? Откройте @wb_jekich_bot и нажмите Start", size=11, color=P1), url="https://t.me/wb_jekich_bot", tooltip="Открыть бота в Telegram")
-    tg_box = ft.Container(content=ft.Column([ft.Text("Вход через Telegram", size=16, weight="bold"), tg_id_in, send_btn, code_in, verify_btn, a_err, bot_hint], spacing=10), visible=False)
+    tg_box = ft.Container(content=ft.Column([ft.Text("Вход через Telegram", size=16, weight="bold"), tg_login_btn, ft.Text("Если не сработало — введите логин и получите код:", size=11, color="#8A8A96"), tg_id_in, send_btn, code_in, verify_btn, a_err, bot_hint], spacing=10), visible=False)
     auth_view = ft.Container(padding=20, bgcolor=BG, expand=True, content=ft.Column([ft.Container(height=20), ft.Container(width=72, height=72, border_radius=20, gradient=ft.LinearGradient(colors=[P2, P1]), content=ft.Icon(ft.Icons.TELEGRAM, size=40, color="white"), alignment=ft.alignment.center), ft.Text("WB.Track", size=24, weight="bold", color="white"), regular_box, tg_box, ft.TextButton(content=mode_txt, on_click=toggle_mode)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
 
     # ---------- шапка ----------
