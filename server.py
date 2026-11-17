@@ -30,6 +30,8 @@ USERS_FILE = os.environ.get("USERS_FILE") or os.path.join(HERE, "users.json")
 CODES_FILE = os.environ.get("CODES_FILE") or os.path.join(HERE, "codes.json")
 CONTACTS_FILE = os.environ.get("CONTACTS_FILE") or os.path.join(HERE, "contacts.json")
 LOGINS_FILE = os.environ.get("LOGINS_FILE") or os.path.join(HERE, "logins.json")
+HISTORY_FILE = os.environ.get("HISTORY_FILE") or os.path.join(HERE, "history.json")
+META_FILE = os.environ.get("META_FILE") or os.path.join(HERE, "meta.json")
 CODE_TTL = 300
 S = "/"
 
@@ -325,6 +327,44 @@ def unauthorized():
 
 # --------------------------------------------------------------------- товары
 
+def _hist_key(owner, sku):
+    return "%s|%s" % (owner or "default", int(sku))
+
+
+def append_history(owner, sku, price):
+    """Пишет точку цены, если она изменилась или прошло больше 6 часов."""
+    try:
+        price = int(price)
+    except (TypeError, ValueError):
+        return
+    if price <= 0:
+        return
+    now = int(time.time())
+    key = _hist_key(owner, sku)
+    hist = load_json(HISTORY_FILE, {}) or {}
+    points = hist.get(key) or []
+    last = points[-1] if points else None
+    if last and int(last.get("p", 0)) == price and now - int(last.get("t", 0)) < 21600:
+        return
+    points.append({"t": now, "p": price})
+    hist[key] = points[-400:]
+    save_json(HISTORY_FILE, hist)
+
+
+def history_prices(owner, sku, limit=40):
+    points = (load_json(HISTORY_FILE, {}) or {}).get(_hist_key(owner, sku)) or []
+    return [int(p.get("p", 0)) for p in points[-limit:] if p.get("p")]
+
+
+def touch_last_check():
+    try:
+        meta = load_json(META_FILE, {}) or {}
+        meta["last_check"] = int(time.time())
+        save_json(META_FILE, meta)
+    except OSError:
+        pass
+
+
 def normalize_task(item, previous=None):
     task = {
         "owner": item.get("owner") or (previous or {}).get("owner") or "default",
@@ -347,7 +387,8 @@ def normalize_task(item, previous=None):
 @app.route("/", methods=["GET"])
 @app.route("/health", methods=["GET"])
 def index():
-    return jsonify({"status": "ok", "service": "WB.Track API", "require_token": REQUIRE_TOKEN})
+    return jsonify({"status": "ok", "service": "WB.Track API", "require_token": REQUIRE_TOKEN,
+                    "last_check": int((load_json(META_FILE, {}) or {}).get("last_check") or 0)})
 
 
 @app.route("/get_ui", methods=["GET"])
@@ -649,7 +690,10 @@ def get_tasks():
     if owner is None:
         return unauthorized()
     tasks = load_json(DATA_FILE, [])
-    return jsonify([t for t in tasks if (t.get("owner") or "default") == owner])
+    mine = [t for t in tasks if (t.get("owner") or "default") == owner]
+    for t in mine:
+        t["history"] = history_prices(owner, t["sku"])
+    return jsonify(mine)
 
 
 @app.route("/tasks", methods=["POST"])
@@ -671,6 +715,9 @@ def add_task():
         tasks = [t for t in tasks if not ((t.get("owner") or "default") == owner and int(t["sku"]) == sku)]
         tasks.append(task)
         save_json(DATA_FILE, tasks)
+        if task.get("current_sbp"):
+            append_history(owner, sku, task["current_sbp"])
+            touch_last_check()
     return jsonify({"ok": True, "task": task})
 
 
@@ -709,9 +756,11 @@ def check_now():
             if sbp is None:
                 continue
             task["name"], task["current_wallet"], task["current_sbp"], task["image"] = name, wallet, sbp, image
+            append_history(owner, task["sku"], sbp)
             updated += 1
         if updated:
             save_json(DATA_FILE, tasks)
+            touch_last_check()
     return jsonify({"ok": True, "updated": updated})
 
 
