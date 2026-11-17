@@ -10,7 +10,7 @@ NET_TIMEOUT = 8
 
 # Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
 # сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
 
 
@@ -20,6 +20,40 @@ def vt(ver):
     for p in str(ver).lstrip("v").split("."):
         parts.append(int(p) if p.isdigit() else 0)
     return tuple(parts + [0] * (3 - len(parts)))[:3]
+
+
+def sparkline(points, width_bars=22, height=30):
+    """Мини-график цены из точек: столбики без внешних зависимостей."""
+    pts = [int(p) for p in (points or []) if p]
+    if len(pts) < 2:
+        return ft.Container(visible=False)
+    step = max(1, len(pts) // width_bars)
+    sample = pts[::step][-width_bars:]
+    lo, hi = min(sample), max(sample)
+    rng = max(1, hi - lo)
+    color = "#00E676" if sample[-1] <= sample[0] else "#FFB300"
+    bars = []
+    for p in sample:
+        h = 4 + int((p - lo) / rng * (height - 4))
+        bars.append(ft.Container(width=4, height=h, bgcolor=color, border_radius=2, opacity=0.55 + 0.45 * (h / height)))
+    return ft.Row(bars, spacing=3, height=height, vertical_alignment=ft.CrossAxisAlignment.END)
+
+
+def ago_text(ts):
+    try:
+        ts = int(ts)
+    except (TypeError, ValueError):
+        return ""
+    if ts <= 0:
+        return ""
+    diff = int(time.time()) - ts
+    if diff < 60:
+        return "только что"
+    if diff < 3600:
+        return "%d мин назад" % (diff // 60)
+    if diff < 86400:
+        return "%d ч назад" % (diff // 3600)
+    return "%d дн назад" % (diff // 86400)
 
 
 def wb_open(page, sku):
@@ -359,7 +393,7 @@ def main(page: ft.Page):
             sbp, wal, tgt = it.get("current_sbp"), it.get("current_wallet"), it["target_price"]
             bt = "✅ Выкуплено" if it["bought"] >= it["limit"] else (f"Еще -{sbp - tgt} ₽" if sbp and sbp > tgt else ("🔥 Цель!" if sbp else "⏳ Обновите"))
             ps = f"СБП: {sbp} ₽ • Кош: {wal} ₽" if sbp else "Цена не загружена"
-            col.controls.append(ft.Container(bgcolor=CARD, padding=12, border_radius=16, border=ft.border.all(1, BORDER), content=ft.Row([ft.Container(content=ft.Image(src=it.get("image", ""), width=64, height=86, fit=ft.ImageFit.COVER), border_radius=10, clip_behavior=ft.ClipBehavior.ANTI_ALIAS), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=14, max_lines=2, color="white"), ft.Text(f"Арт: {it['sku']}", size=11, color="#8A8A94"), ft.Row([ft.Text((f"{sbp} ₽" if sbp else "—"), size=18, weight="bold", color=(OK if (sbp and sbp <= tgt) else WARN)), ft.Text((f"кош. {wal} ₽" if wal else ""), size=11, color="#8A8A94")], spacing=8), ft.Text(bt, size=11, color=P1, weight="w500"), ft.Text(f"Цель ≤ {tgt} ₽  ·  выкуплено {it['bought']}/{it['limit']}", size=11, color="#8A8A94")], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, icon_color=OK, icon_size=20, tooltip="Выкупить", visible=it["bought"] < it["limit"], on_click=lambda _, t=it: buy(t)), ft.IconButton(icon=ft.Icons.EDIT_ROUNDED, icon_color="#A0A0B0", icon_size=20, tooltip="Редактировать", on_click=lambda _, t=it: edit(t)), ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_color="#A0A0B0", icon_size=20, tooltip="Открыть в WB", on_click=lambda _, s=it["sku"]: wb_open(page, s)), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color=DANGER, icon_size=20, on_click=lambda _, s=it["sku"]: bg(delete, s))], spacing=0)], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)))
+            col.controls.append(ft.Container(bgcolor=CARD, padding=12, border_radius=16, border=ft.border.all(1, BORDER), content=ft.Row([ft.Container(content=ft.Image(src=it.get("image", ""), width=64, height=86, fit=ft.ImageFit.COVER), border_radius=10, clip_behavior=ft.ClipBehavior.ANTI_ALIAS), ft.Column([ft.Text(it.get("name") or str(it["sku"]), weight="bold", size=14, max_lines=2, color="white"), ft.Text(f"Арт: {it['sku']}", size=11, color="#8A8A94"), ft.Row([ft.Text((f"{sbp} ₽" if sbp else "—"), size=18, weight="bold", color=(OK if (sbp and sbp <= tgt) else WARN)), ft.Text((f"кош. {wal} ₽" if wal else ""), size=11, color="#8A8A94")], spacing=8), sparkline(it.get("history") or []), ft.Text(bt, size=11, color=P1, weight="w500"), ft.Text(f"Цель ≤ {tgt} ₽  ·  выкуплено {it['bought']}/{it['limit']}", size=11, color="#8A8A94")], expand=True, spacing=2), ft.Column([ft.IconButton(icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, icon_color=OK, icon_size=20, tooltip="Выкупить", visible=it["bought"] < it["limit"], on_click=lambda _, t=it: buy(t)), ft.IconButton(icon=ft.Icons.EDIT_ROUNDED, icon_color="#A0A0B0", icon_size=20, tooltip="Редактировать", on_click=lambda _, t=it: edit(t)), ft.IconButton(icon=ft.Icons.OPEN_IN_NEW_ROUNDED, icon_color="#A0A0B0", icon_size=20, tooltip="Открыть в WB", on_click=lambda _, s=it["sku"]: wb_open(page, s)), ft.IconButton(icon=ft.Icons.DELETE_ROUNDED, icon_color=DANGER, icon_size=20, on_click=lambda _, s=it["sku"]: bg(delete, s))], spacing=0)], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)))
 
     def load(force=False):
         if st["busy"]:
@@ -384,6 +418,16 @@ def main(page: ft.Page):
                     if s:
                         t["name"], t["current_wallet"], t["current_sbp"], t["image"] = n, w, s, img
             st["tasks"] = tasks
+            try:
+                h = requests.get(API + S + "health", timeout=NET_TIMEOUT).json()
+                ts = int(h.get("last_check") or 0)
+                txt = ago_text(ts)
+                if txt:
+                    st_lbl.value = "Проверено " + txt
+                    diff = time.time() - ts
+                    dot.color = "#00E676" if diff < 3600 else ("#FFB300" if diff < 6 * 3600 else "#FF5252")
+            except (requests.RequestException, ValueError, TypeError):
+                pass
             reached = [t for t in tasks if t.get("current_sbp") and t["current_sbp"] <= t["target_price"] and (t.get("bought") or 0) < (t.get("limit") or 1)]
             if reached and not st.get("alerted_shown"):
                 st["alerted_shown"] = True
@@ -396,7 +440,9 @@ def main(page: ft.Page):
         finally:
             st["busy"] = False
             spin.visible = False
-            if st_lbl.value == "Онлайн":
+            if st_lbl.value.startswith("Обновление") or not st_lbl.value:
+                st_lbl.value = "Онлайн"
+            if st_lbl.value.startswith("Проверено") or st_lbl.value == "Онлайн":
                 dot.color = "#00E676"
             page.update()
 
@@ -629,4 +675,5 @@ def main(page: ft.Page):
         load()
 
 
-ft.app(target=main)
+if __name__ == "__main__":
+    ft.app(target=main)
