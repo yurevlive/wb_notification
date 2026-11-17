@@ -28,6 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.environ.get("TASKS_FILE") or os.path.join(HERE, "tasks.json")
 USERS_FILE = os.environ.get("USERS_FILE") or os.path.join(HERE, "users.json")
 CODES_FILE = os.environ.get("CODES_FILE") or os.path.join(HERE, "codes.json")
+CONTACTS_FILE = os.environ.get("CONTACTS_FILE") or os.path.join(HERE, "contacts.json")
 CODE_TTL = 300
 S = "/"
 
@@ -107,32 +108,87 @@ def check_pw(stored, password):
     return hmac.compare_digest(stored, hashlib.sha256(password.encode("utf-8")).hexdigest())
 
 
+def _save_contacts(contacts):
+    try:
+        save_json(CONTACTS_FILE, contacts)
+    except OSError as e:
+        sys.stderr.write("contacts save failed: %r\n" % (e,))
+
+
+def _username_by_id(contacts, cid):
+    for uname, info in contacts.items():
+        if str(info.get("id")) == str(cid):
+            return uname
+    return ""
+
+
+def peek_contacts():
+    """Запоминает username -> id из неподтверждённых апдейтов (offset не двигаем)."""
+    if not TG_TOKEN:
+        return {}
+    try:
+        r = requests.get(tg_url("getUpdates"), params={"limit": 100, "timeout": 0}, timeout=10)
+        payload = r.json()
+    except Exception:
+        return {}
+    found = {}
+    for upd in (payload.get("result") or []) if isinstance(payload, dict) else []:
+        msg = upd.get("message") or upd.get("edited_message") or upd.get("my_chat_member") or {}
+        chat = msg.get("chat") or {}
+        if chat.get("type") != "private":
+            continue
+        uname = (chat.get("username") or "").strip().lower()
+        cid = chat.get("id")
+        if uname and cid is not None:
+            found[uname] = {"id": str(cid), "name": chat.get("first_name") or ""}
+    return found
+
+
 def resolve_chat(raw):
-    """Возвращает (chat_id, key, error). key — стабильный ключ для кода."""
+    """(chat_id, key, error). Логин (@username) — основной способ, id — запасной."""
     raw = (raw or "").strip()
     if not raw:
-        return "", "", "Введите логин или ID Telegram"
-    key = raw[1:] if raw.startswith("@") else raw
-    chat = raw if raw.isdigit() else "@" + key
+        return "", "", "Введите логин Telegram (например @yurev0) или числовой ID"
     if not TG_TOKEN:
-        return "", key, "TG_TOKEN empty on server"
-    # @username ненадёжен (каналы, смена логина) — пробуем числовой id
+        return "", raw, "TG_TOKEN empty on server"
+    handle = (raw[1:] if raw.startswith("@") else raw).strip()
+    if not handle:
+        return "", "", "Введите логин Telegram"
+    contacts = load_json(CONTACTS_FILE, {}) or {}
+    if handle.isdigit():
+        uname = _username_by_id(contacts, handle)
+        return handle, (uname or handle), None
+    uname = handle.lower()
+    info = contacts.get(uname)
+    if not info:
+        fresh = peek_contacts()
+        if fresh:
+            contacts.update(fresh)
+            _save_contacts(contacts)
+            info = contacts.get(uname)
+    if info and info.get("id"):
+        return str(info["id"]), uname, None
+    # незнакомый логин: возможно, это канал/группа, либо человек ещё не жал Start
     try:
-        r = requests.get(tg_url("getChat"), params={"chat_id": chat}, timeout=10)
+        r = requests.get(tg_url("getChat"), params={"chat_id": "@" + uname}, timeout=10)
         if r.status_code == 200:
-            payload = r.json()
-            if payload.get("ok"):
-                info = payload.get("result", {})
-                if info.get("type") in ("channel", "group", "supergroup"):
-                    return "", key, "Это канал или группа, а не личный аккаунт. Откройте %s в Telegram и нажмите Start." % BOT_LINK
-                cid = info.get("id")
-                if cid is not None:
-                    return str(cid), str(cid), None
-        elif r.status_code == 400:
-            sys.stderr.write("getChat failed: %s\n" % (r.text[:200],))
+            res = r.json().get("result") or {}
+            if res.get("type") in ("channel", "group", "supergroup"):
+                return "", uname, "@%s — это канал или группа. Введите свой личный логин." % handle
+            if res.get("type") == "private" and res.get("id") is not None:
+                contacts[uname] = {"id": str(res["id"]), "name": res.get("first_name") or ""}
+                _save_contacts(contacts)
+                return str(res["id"]), uname, None
     except Exception as e:
         sys.stderr.write("getChat error: %r\n" % (e,))
-    return chat, key, None
+    # пользователь мог только что нажать Start — пробуем ещё раз
+    fresh = peek_contacts()
+    if fresh:
+        contacts.update(fresh)
+        _save_contacts(contacts)
+        if uname in contacts and contacts[uname].get("id"):
+            return str(contacts[uname]["id"]), uname, None
+    return "", uname, "Аккаунт @%s ещё не открывал бота. Откройте %s в Telegram, нажмите Start и повторите." % (handle, BOT_LINK)
 
 
 def send_tg(chat_id, text):
@@ -296,7 +352,9 @@ def request_code():
         return jsonify({"ok": False, "error": err, "sent": False}), 400
     code = "%06d" % random.randrange(1000000)
     now = int(time.time())
-    keys = [key] if chat == key or not chat.isdigit() else [key, chat]
+    keys = [key]
+    if chat.isdigit() and chat not in keys:
+        keys.append(chat)
     with _lock:
         codes = load_json(CODES_FILE, {})
         for k in keys:
@@ -309,6 +367,24 @@ def request_code():
         return jsonify({"ok": True, "sent": False, "send_error": result.get("error"),
                         "error": "Telegram не принял сообщение. Откройте %s, нажмите Start и повторите." % BOT_LINK})
     return jsonify({"ok": True, "sent": True})
+
+
+@app.route("/tg_contact", methods=["POST"])
+def tg_contact():
+    """Воркер сообщает серверу: этот @username = этот telegram id."""
+    expected = os.environ.get("WORKER_TOKEN", "").strip()
+    if expected and not hmac.compare_digest(expected, request.headers.get("X-Worker-Token", "")):
+        return unauthorized()
+    data = request.json or {}
+    uname = (data.get("username") or "").strip().lower().lstrip("@")
+    cid = str(data.get("id") or "").strip()
+    if not uname or not cid:
+        return jsonify({"ok": False, "error": "username and id are required"}), 400
+    with _lock:
+        contacts = load_json(CONTACTS_FILE, {}) or {}
+        contacts[uname] = {"id": cid, "name": (data.get("name") or "").strip()}
+        _save_contacts(contacts)
+    return jsonify({"ok": True})
 
 
 @app.route("/verify_code", methods=["POST"])

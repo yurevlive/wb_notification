@@ -99,7 +99,7 @@ def main(page: ft.Page):
     tg_in = ft.TextField(hint_text="Числовой Telegram ID", border_radius=12, filled=True, bgcolor=CARD, visible=False)
     rem = ft.Checkbox(label="Запомнить меня", value=True, active_color=P1)
     # --- Telegram-вход ---
-    tg_id_in = ft.TextField(hint_text="Ваш Telegram ID (числовой, узнать: @userinfobot)", border_radius=12, filled=True, bgcolor=CARD)
+    tg_id_in = ft.TextField(hint_text="Логин Telegram, например @yurev0", border_radius=12, filled=True, bgcolor=CARD)
     code_in = ft.TextField(hint_text="Код из Telegram", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, visible=False)
     send_btn = ft.ElevatedButton(content=ft.Text("Отправить код", color="white", weight="bold"), bgcolor=P1, height=46)
     verify_btn = ft.ElevatedButton(content=ft.Text("Войти по коду", color="white", weight="bold"), bgcolor=P1, height=46, visible=False)
@@ -271,7 +271,8 @@ def main(page: ft.Page):
     auth_btn = ft.ElevatedButton(content=b_txt, bgcolor=P1, height=46, on_click=auth)
 
     regular_box = ft.Container(content=ft.Column([a_t, u_in, p_in, tg_in, rem, a_err, ft.Container(content=auth_btn, expand=True)], spacing=10), visible=True)
-    tg_box = ft.Container(content=ft.Column([ft.Text("Вход через Telegram", size=16, weight="bold"), tg_id_in, send_btn, code_in, verify_btn, a_err], spacing=10), visible=False)
+    bot_hint = ft.TextButton(content=ft.Text("Нет кода? Откройте @wb_jekich_bot и нажмите Start", size=11, color=P1), url="https://t.me/wb_jekich_bot", tooltip="Открыть бота в Telegram")
+    tg_box = ft.Container(content=ft.Column([ft.Text("Вход через Telegram", size=16, weight="bold"), tg_id_in, send_btn, code_in, verify_btn, a_err, bot_hint], spacing=10), visible=False)
     auth_view = ft.Container(padding=20, bgcolor=BG, expand=True, content=ft.Column([ft.Container(height=20), ft.Container(width=72, height=72, border_radius=20, gradient=ft.LinearGradient(colors=[P2, P1]), content=ft.Icon(ft.Icons.TELEGRAM, size=40, color="white"), alignment=ft.alignment.center), ft.Text("WB.Track", size=24, weight="bold", color="white"), regular_box, tg_box, ft.TextButton(content=mode_txt, on_click=toggle_mode)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))
 
     # ---------- шапка ----------
