@@ -10,7 +10,7 @@ NET_TIMEOUT = 8
 
 # Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
 # сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
 
 
@@ -67,6 +67,28 @@ def wb_open(page, sku):
         page.launch_url(intent)
     except Exception:
         page.launch_url(WB + str(sku) + S + "detail.aspx")
+
+
+import re as _re
+
+def sku_from_text(text):
+    """Достаёт артикул из ссылки WB/Ozon или просто числа."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    m = _re.search(r"wildberries\\.ru/catalog/(\\d+)", t)
+    if m:
+        return int(m.group(1))
+    m = _re.search(r"ozon\\.ru/product/[^/]*?(\\d{6,})", t)
+    if m:
+        return int(m.group(1))
+    m = _re.search(r"(\\d{6,})", t)
+    if m:
+        return int(m.group(1))
+    try:
+        return int(t)
+    except ValueError:
+        return None
 
 
 def fetch_wb(sku):
@@ -374,6 +396,23 @@ def main(page: ft.Page):
     pr_in = ft.TextField(hint_text="Цена до (₽)", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, expand=True)
     lim_in = ft.TextField(value="1", prefix_text="Шт: ", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, filled=True, bgcolor=CARD, width=105)
     srch = ft.TextField(hint_text="Поиск...", prefix_icon=ft.Icons.SEARCH_ROUNDED, border_radius=12, filled=True, bgcolor=CARD, on_change=lambda e: (st.update({"q": srch.value.lower()}), render(), page.update()))
+
+    async def paste_link(e):
+        try:
+            txt = await page.get_clipboard_async()
+        except Exception:
+            txt = ""
+        sku = sku_from_text(txt or "")
+        if sku:
+            sku_in.value = str(sku)
+            page.update()
+            snack = ft.SnackBar(content=ft.Text(f"Артикул {sku} вставлен", color="white"), bgcolor="#1B5E20")
+            page.overlay.append(snack); snack.open = True; page.update()
+        else:
+            snack = ft.SnackBar(content=ft.Text("В буфере нет ссылки WB/Ozon", color="white"), bgcolor="#B00020")
+            page.overlay.append(snack); snack.open = True; page.update()
+
+    paste_btn = ft.IconButton(icon=ft.Icons.CONTENT_PASTE_ROUNDED, icon_color=P1, tooltip="Вставить ссылку из буфера", on_click=lambda e: bg(paste_link))
     col = ft.Column(spacing=10)
     empty = ft.Container(visible=False, padding=40, content=ft.Column([ft.Icon(ft.Icons.INBOX_ROUNDED, size=56, color="#3A3A48"), ft.Text("Пока пусто", size=16, weight="bold", color="#8A8A94"), ft.Text("Добавьте артикул и цену — начнём следить", size=12, color="#5A5A66")], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6))
 
@@ -443,8 +482,12 @@ def main(page: ft.Page):
     def add(e):
         if st["busy"] or not sku_in.value or not pr_in.value:
             return
+        sku = sku_from_text(sku_in.value)
+        if not sku:
+            snack = ft.SnackBar(content=ft.Text("Не нашёл артикул в тексте", color="white"), bgcolor="#B00020")
+            page.overlay.append(snack); snack.open = True; page.update(); return
         try:
-            sku, tgt, lim = int(sku_in.value.strip()), int(pr_in.value.strip()), int(lim_in.value.strip() or 1)
+            tgt, lim = int(pr_in.value.strip()), int(lim_in.value.strip() or 1)
         except ValueError:
             return
         sku_in.value, pr_in.value = "", ""
@@ -533,7 +576,7 @@ def main(page: ft.Page):
         load()
 
     add_btn = ft.ElevatedButton(content=ft.Text("Добавить в отслеживание", color="white", weight="bold"), bgcolor=P1, height=46, on_click=add)
-    main_b = ft.Column(visible=False, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, ft.Container(bgcolor=CARD, padding=12, border_radius=16, border=ft.border.all(1, BORDER), content=ft.Column([ft.Row([sku_in], spacing=8), ft.Row([pr_in, lim_in], spacing=8), ft.Container(content=add_btn, expand=True)], spacing=10)), srch, col, empty, ft.Text(f"WB.Track v{APP_VERSION}", size=10, color="#5A5A66", text_align=ft.TextAlign.CENTER)], spacing=12, horizontal_alignment=ft.CrossAxisAlignment.CENTER))])
+    main_b = ft.Column(visible=False, controls=[hdr, ft.Container(padding=14, content=ft.Column([stats, ft.Container(bgcolor=CARD, padding=12, border_radius=16, border=ft.border.all(1, BORDER), content=ft.Column([ft.Row([sku_in, paste_btn], spacing=8), ft.Row([pr_in, lim_in], spacing=8), ft.Container(content=add_btn, expand=True)], spacing=10)), srch, col, empty, ft.Text(f"WB.Track v{APP_VERSION}", size=10, color="#5A5A66", text_align=ft.TextAlign.CENTER)], spacing=12, horizontal_alignment=ft.CrossAxisAlignment.CENTER))])
 
     # ---------- обновление приложения ----------
     upd_txt = ft.Text("", size=12, color="white", expand=True)
