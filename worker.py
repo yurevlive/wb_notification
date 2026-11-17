@@ -191,7 +191,13 @@ def api_post_task(payload):
         log("[dry-run] POST /tasks %s" % json.dumps(payload, ensure_ascii=False)[:160])
         return True
     try:
-        r = requests.post(API_BASE + "/tasks", json=payload, timeout=20)
+        headers = {}
+        token = os.environ.get("WORKER_TOKEN", "").strip()
+        if token:
+            headers["X-Worker-Token"] = token
+        r = requests.post(API_BASE + "/tasks", json=payload, headers=headers, timeout=20)
+        if r.status_code == 401:
+            log("POST /tasks: 401 — проверьте WORKER_TOKEN (сервер и GitHub Secrets)")
         return r.status_code == 200
     except requests.RequestException as e:
         log("POST /tasks: %s" % e)
@@ -203,7 +209,11 @@ def api_delete_task(sku, owner=""):
         log("[dry-run] DELETE /tasks/%s" % sku)
         return True
     try:
-        r = requests.delete(API_BASE + "/tasks/%s" % sku, params={"user": owner}, timeout=20)
+        headers = {}
+        token = os.environ.get("WORKER_TOKEN", "").strip()
+        if token:
+            headers["X-Worker-Token"] = token
+        r = requests.delete(API_BASE + "/tasks/%s" % sku, params={"user": owner}, headers=headers, timeout=20)
         return r.status_code == 200
     except requests.RequestException as e:
         log("DELETE /tasks: %s" % e)

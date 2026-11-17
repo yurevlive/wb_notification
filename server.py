@@ -316,6 +316,9 @@ def resolve_owner(payload_user="default"):
     login, _ = find_user_by_token(bearer_token())
     if login:
         return login, True
+    expected = os.environ.get("WORKER_TOKEN", "").strip()
+    if expected and hmac.compare_digest(expected, request.headers.get("X-Worker-Token", "")):
+        return (payload_user or "default").strip().lower(), False
     if REQUIRE_TOKEN:
         return None, False
     return (payload_user or "default").strip().lower(), False
