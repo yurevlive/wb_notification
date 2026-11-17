@@ -32,6 +32,7 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          WORKER_TOKEN: ${{ secrets.WORKER_TOKEN }}
           WB_API_BASE: ${{ vars.WB_API_BASE || 'https://yurevlive.pythonanywhere.com' }}
           PUSH_PRICES: "1"
           WORKER_LOOP_MINUTES: "55"
