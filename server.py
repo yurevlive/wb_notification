@@ -834,9 +834,19 @@ async function render(t){current=t;const v=document.getElementById('view');v.inn
   if(t==='users'){const d=await api('/admin/api/users');v.innerHTML=`<div class="card"><table><tr><th>Логин</th><th>TG id</th><th>Токен</th><th>Действия</th></tr>${d.map(u=>`<tr><td>${u.login}</td><td>${u.tg_id||'—'}</td><td>${u.has_token?'да':'нет'}</td><td><button class="danger" onclick="delUser('${u.login}')">Удалить</button> <button onclick="resetPw('${u.login}')">Сбросить пароль</button></td></tr>`).join('')}</table></div>`;}
   if(t==='tasks'){const d=await api('/admin/api/tasks');v.innerHTML=`<div class="card"><table><tr><th>Владелец</th><th>Артикул</th><th>Цена</th><th>Цель</th><th>Куплено</th><th></th></tr>${d.map(t=>`<tr><td>${t.owner}</td><td>${t.sku}</td><td>${t.current_sbp||'—'}</td><td>${t.target_price}</td><td>${t.bought}/${t.limit}</td><td><button class="danger" onclick="delTask('${t.owner}',${t.sku})">Удалить</button></td></tr>`).join('')}</table></div>`;}
   if(t==='broadcast'){v.innerHTML=`<div class="card"><textarea id="btext" rows="4" placeholder="Текст сообщения всем пользователям"></textarea><div style="margin-top:8px"><button class="primary" onclick="broadcast()">Отправить</button></div><div class="muted" id="bres"></div></div>`;}
-  if(t==='calc'){v.innerHTML=`<div class="card"><h3 style="margin:0 0 8px">Калькулятор цен WB</h3><div class="row"><input id="base" type="number" placeholder="Базовая цена, ₽ (из price-history)" style="flex:1"><button class="primary" onclick="conv()">Посчитать</button></div><div id="convres" class="muted" style="margin-top:8px"></div></div><div class="card"><h3 style="margin:0 0 8px">Калькулятор</h3><div id="calcdisp" style="background:#1E1E2A;padding:12px;border-radius:8px;font-size:24px;text-align:right;margin-bottom:8px;min-height:36px">0</div><div id="calcgrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px"></div></div>`;
-    // price converter
-    window.conv=function(){const b=parseFloat(document.getElementById('base').value);if(!b||b<=0){document.getElementById('convres').textContent='Введите базовую цену';return;}const w=Math.round(b*426/395);const s=Math.round(b*454/395);document.getElementById('convres').innerHTML='Кошелёк: <b>'+w+' ₽</b> &nbsp; СБП: <b>'+s+' ₽</b><br><span class="muted">База '+b+' ₽ × 426/395 и × 454/395</span>';};
+  if(t==='calc'){v.innerHTML=`<div class="card"><h3 style="margin:0 0 8px">Конвертер цен WB</h3><div class="muted" style="margin-bottom:8px">Введи любую из трёх цен — остальные посчитаются (коэффициенты 426/395 и 454/395)</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px"><div><label class="muted">База (price-history), ₽</label><input id="cb" type="number" oninput="conv2('b')" style="width:100%"></div><div><label class="muted">Кошелёк, ₽</label><input id="cw" type="number" oninput="conv2('w')" style="width:100%"></div><div><label class="muted">СБП, ₽</label><input id="cs" type="number" oninput="conv2('s')" style="width:100%"></div></div><div id="convres2" class="muted" style="margin-top:8px"></div></div><div class="card"><h3 style="margin:0 0 8px">Калькулятор</h3><div id="calcdisp" style="background:#1E1E2A;padding:12px;border-radius:8px;font-size:24px;text-align:right;margin-bottom:8px;min-height:36px">0</div><div id="calcgrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px"></div></div>`;
+    window.conv2=function(src){const b=document.getElementById('cb'),w=document.getElementById('cw'),s=document.getElementById('cs'),r=document.getElementById('convres2');
+      let base=null;
+      if(src==='b'){base=parseFloat(b.value);}
+      else if(src==='w'){base=parseFloat(w.value)*395/426;}
+      else if(src==='s'){base=parseFloat(s.value)*395/454;}
+      if(!base||base<=0){r.textContent='Введите число';return;}
+      const W=Math.round(base*426/395), S=Math.round(base*454/395);
+      if(src!=='b') b.value=Math.round(base);
+      if(src!=='w') w.value=W;
+      if(src!=='s') s.value=S;
+      r.innerHTML='База: <b>'+Math.round(base)+' ₽</b> &nbsp; Кошелёк: <b>'+W+' ₽</b> &nbsp; СБП: <b>'+S+' ₽</b>';
+    };
     // simple calculator
     let cexpr='';const disp=document.getElementById('calcdisp');
     function cupd(){disp.textContent=cexpr||'0';}
