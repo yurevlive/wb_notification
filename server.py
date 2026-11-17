@@ -842,7 +842,7 @@ async function render(t){current=t;const v=document.getElementById('view');v.inn
     function cupd(){disp.textContent=cexpr||'0';}
     const btns=['7','8','9','/','4','5','6','*','1','2','3','-','0','.','=','+','C'];
     const g=document.getElementById('calcgrid');
-    btns.forEach(b=>{const el=document.createElement('button');el.textContent=b;el.style.cssText='padding:12px;font-size:18px;border:none;border-radius:8px;background:#2A2A38;color:#E0E0E0;cursor:pointer';el.onclick=()=>{if(b==='C'){cexpr='';cupd();return;}if(b==='='){try{cexpr=String(eval(cexpr.replace(/[^0-9.+\\-*/()]/g,'')));}catch(e){cexpr='Ошибка';}cupd();return;}cexpr+=b;cupd();};g.appendChild(el);});
+    btns.forEach(b=>{const el=document.createElement('button');el.textContent=b;el.style.cssText='padding:12px;font-size:18px;border:none;border-radius:8px;background:#2A2A38;color:#E0E0E0;cursor:pointer';el.onclick=()=>{if(b==='C'){cexpr='';cupd();return;}if(b==='='){try{cexpr=String(eval(cexpr.replace(/[^0-9.+*/()-]/g,'')));}catch(e){cexpr='Ошибка';}cupd();return;}cexpr+=b;cupd();};g.appendChild(el);});
   }
 }
 async function delUser(l){if(!confirm('Удалить '+l+'?'))return;await api('/admin/api/users/'+encodeURIComponent(l),{method:'DELETE'});toast('Удалено');render(current)}
