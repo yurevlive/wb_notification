@@ -1051,8 +1051,10 @@ def admin_run():
         if r.status_code == 204:
             return jsonify({"ok": True, "message": "Запуск отправлен в GitHub Actions"})
         return jsonify({"ok": False, "error": "GitHub: HTTP %s" % r.status_code}), 200
-    except requests.RequestException as e:
-        return jsonify({"ok": False, "error": repr(e)}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": repr(e)[:300]}), 200
 
 
 if __name__ == "__main__":
