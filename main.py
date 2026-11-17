@@ -10,7 +10,7 @@ NET_TIMEOUT = 8
 
 # Версия указывается здесь. Тег релиза (v1.0.1) обязан совпадать с ней —
 # сборка упадёт, если не совпадает, иначе приложение зациклится на "Обновить".
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 REL_URL = "https://api.github.com/repos/yurevlive/wb_notification/releases/latest"
 
 
@@ -100,16 +100,10 @@ def main(page: ft.Page):
     page.padding = 0
     page.scroll = ft.ScrollMode.AUTO
     page.locale_configuration = ft.LocaleConfiguration(supported_locales=[ft.Locale("ru", "RU")], current_locale=ft.Locale("ru", "RU"))
-    # тема из сохранённых настроек
-    _theme = page.client_storage.get("wb_theme") or "dark"
-    if _theme == "light":
-        P1, P2, BG, CARD, CARD2, BORDER = "#CB11AB", "#E91E8C", "#F5F5F7", "#FFFFFF", "#FFFFFF", "#E5E5EA"
-        OK, WARN, DANGER = "#00B85A", "#F59E0B", "#EF4444"
-        page.theme_mode = ft.ThemeMode.LIGHT
-    else:
-        P1, P2, BG, CARD, CARD2, BORDER = "#D946EF", "#7C3AED", "#0B0B12", "#16161F", "#1E1E2A", "#2A2A38"
-        OK, WARN, DANGER = "#22C55E", "#F59E0B", "#EF4444"
-        page.theme_mode = ft.ThemeMode.DARK
+    # только тёмная премиум-тема
+    P1, P2, BG, CARD, CARD2, BORDER = "#D946EF", "#7C3AED", "#0B0B12", "#16161F", "#1E1E2A", "#2A2A38"
+    OK, WARN, DANGER = "#22C55E", "#F59E0B", "#EF4444"
+    page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG
     page.bgcolor = BG
     st = {"tasks": [], "user": "", "token": "", "reg": False, "tg_mode": False, "q": "", "busy": False, "alerted_shown": False}
@@ -600,15 +594,6 @@ def main(page: ft.Page):
             dlg2.open = True
             page.update()
 
-        def toggle_theme(e):
-            cur = page.client_storage.get("wb_theme") or "dark"
-            new = "light" if cur == "dark" else "dark"
-            page.client_storage.set("wb_theme", new)
-            snack = ft.SnackBar(content=ft.Text(f"Тема: {new}. Перезапустите приложение.", color="white"), bgcolor="#1B5E20")
-            page.overlay.append(snack)
-            snack.open = True
-            page.update()
-
         def do_check():
             status_txt.opacity = 0
             status_txt.scale = 0.8
@@ -636,8 +621,6 @@ def main(page: ft.Page):
             status_txt.scale = 1.0
             page.update()
 
-        cur_theme = page.client_storage.get("wb_theme") or "dark"
-        theme_label = "Тёмная" if cur_theme == "dark" else "Светлая"
 
         spinner = ft.ProgressRing(width=14, height=14, stroke_width=2, color=P1, visible=False)
         dlg = ft.AlertDialog(
@@ -652,7 +635,7 @@ def main(page: ft.Page):
                 ft.Row([ft.ElevatedButton(content=ft.Text("Проверить обновления", color="white", weight="bold"), bgcolor=P1, on_click=lambda e: bg(do_check)), spinner], spacing=10),
                 status_txt,
                 ft.TextButton(content=ft.Text("Скачать обновление", color=P1), visible=bool(st.get("apk")), on_click=lambda e: page.launch_url(st["apk"])),
-                ft.ElevatedButton(content=ft.Text(f"Тема: {theme_label} (переключить)", color="white", weight="bold"), bgcolor=CARD2, on_click=toggle_theme),
+
                 ft.Divider(height=1, color=BORDER),
                 ft.Text("О приложении", size=12, weight="bold", color="#8A8A94"),
                 ft.Text("WB.Track — трекер цен Wildberries.", size=12, color="#8A8A94"),
