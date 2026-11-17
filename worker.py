@@ -32,6 +32,10 @@ STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 DRY_RUN = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
 PUSH_PRICES = os.environ.get("PUSH_PRICES", "").lower() in ("1", "true", "yes")
 TG_POLL_TIMEOUT = int(os.environ.get("TG_POLL_TIMEOUT", "8"))
+# Долгий прогон: GitHub-расписание опаздывает на десятки минут, поэтому один
+# запуск живёт LOOP_MINUTES и сам проверяет цены каждые CHECK_INTERVAL секунд.
+LOOP_MINUTES = int(os.environ.get("WORKER_LOOP_MINUTES", "0") or 0)
+CHECK_INTERVAL = max(60, int(os.environ.get("CHECK_INTERVAL", "300") or 300))
 
 HELP = (
     "🤖 WB.Track [by.Жекич]\n"
@@ -345,7 +349,7 @@ def check_prices(state):
     return changed
 
 
-def main():
+def run_cycle():
     state = load_state()
     changed = poll_telegram(state)
     changed = check_prices(state) or changed
@@ -353,6 +357,27 @@ def main():
         save_state(state)
     else:
         log("Состояние не изменилось")
+    return 0
+
+
+def main():
+    if LOOP_MINUTES <= 0:
+        return run_cycle()
+
+    deadline = time.time() + LOOP_MINUTES * 60
+    log("Долгий прогон: %d мин, проверка каждые %d c" % (LOOP_MINUTES, CHECK_INTERVAL))
+    round_no = 0
+    while True:
+        round_no += 1
+        log("--- круг %d, %s ---" % (round_no, time.strftime("%H:%M:%S UTC", time.gmtime())))
+        try:
+            run_cycle()
+        except Exception as e:  # один сбой не должен убивать весь прогон
+            log("Ошибка круга: %r" % (e,))
+        if time.time() + CHECK_INTERVAL > deadline:
+            break
+        time.sleep(CHECK_INTERVAL)
+    log("Прогон завершён: %d кругов" % round_no)
     return 0
 
 
