@@ -20,7 +20,7 @@ import sys
 import threading
 import time
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 
 app = Flask(__name__)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -765,6 +765,200 @@ def check_now():
             save_json(DATA_FILE, tasks)
             touch_last_check()
     return jsonify({"ok": True, "updated": updated})
+
+
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
+
+
+def admin_ok():
+    got = request.headers.get("X-Admin-Token", "") or request.args.get("token", "")
+    if not ADMIN_TOKEN:
+        return False
+    return hmac.compare_digest(got, ADMIN_TOKEN)
+
+
+def admin_guard():
+    if not admin_ok():
+        return unauthorized()
+    return None
+
+
+ADMIN_HTML = r'''<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WB.Track — админка</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#0B0B12;color:#E0E0E0}
+header{background:linear-gradient(90deg,#7C3AED,#D946EF);padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header h1{margin:0;font-size:18px}
+main{padding:20px;max-width:1100px;margin:0 auto}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tabs button{background:#16161F;color:#E0E0E0;border:1px solid #2A2A38;padding:8px 14px;border-radius:8px;cursor:pointer}
+.tabs button.active{background:#D946EF;border-color:#D946EF;color:#fff}
+.card{background:#16161F;border:1px solid #2A2A38;border-radius:12px;padding:16px;margin-bottom:16px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px 10px;border-bottom:1px solid #2A2A38;text-align:left;font-size:13px}
+th{color:#8A8A94;font-weight:600}
+button.danger{background:#EF4444;color:#fff;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:12px}
+button.primary{background:#D946EF;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer}
+input,textarea{background:#1E1E2A;color:#E0E0E0;border:1px solid #2A2A38;border-radius:8px;padding:8px;width:100%;box-sizing:border-box}
+.row{display:flex;gap:8px;align-items:center}
+.stat{display:inline-block;background:#1E1E2A;padding:10px 14px;border-radius:10px;margin:4px}
+.stat b{display:block;font-size:22px;color:#D946EF}
+.muted{color:#8A8A94;font-size:12px}
+#toast{position:fixed;bottom:20px;right:20px;background:#1B5E20;color:#fff;padding:10px 16px;border-radius:8px;display:none}
+</style></head><body>
+<header><h1>WB.Track — админка</h1><div id="who" class="muted"></div></header>
+<main>
+<div class="tabs">
+<button class="tab active" data-t="overview">Обзор</button>
+<button class="tab" data-t="users">Пользователи</button>
+<button class="tab" data-t="tasks">Задачи</button>
+<button class="tab" data-t="broadcast">Рассылка</button>
+</div>
+<div id="view"></div>
+</main><div id="toast"></div>
+<script>
+const TOKEN = localStorage.getItem('admin_token') || prompt('ADMIN_TOKEN:');
+if (TOKEN) localStorage.setItem('admin_token', TOKEN);
+const H = {'X-Admin-Token': TOKEN||''};
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
+async function api(path, opts={}){const r=await fetch(path,{...opts,headers:{...H,...(opts.headers||{})}});if(!r.ok){toast('Ошибка '+r.status);throw new Error(r.status)}return r.json()}
+function showTab(t){document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.t===t));render(t)}
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.t)));
+let current='overview';
+async function render(t){current=t;const v=document.getElementById('view');v.innerHTML='Загрузка...';
+  if(t==='overview'){const d=await api('/admin/api/overview');v.innerHTML=`<div class="card"><div class="stat"><b>${d.users}</b>пользователей</div><div class="stat"><b>${d.tasks}</b>задач</div><div class="stat"><b>${d.contacts}</b>контактов TG</div></div><div class="card"><div class="muted">Последняя проверка: ${d.last_check?new Date(d.last_check*1000).toLocaleString():'—'}</div><div class="muted">REQUIRE_TOKEN: ${d.require_token}</div></div>`;}
+  if(t==='users'){const d=await api('/admin/api/users');v.innerHTML=`<div class="card"><table><tr><th>Логин</th><th>TG id</th><th>Токен</th><th>Действия</th></tr>${d.map(u=>`<tr><td>${u.login}</td><td>${u.tg_id||'—'}</td><td>${u.has_token?'да':'нет'}</td><td><button class="danger" onclick="delUser('${u.login}')">Удалить</button> <button onclick="resetPw('${u.login}')">Сбросить пароль</button></td></tr>`).join('')}</table></div>`;}
+  if(t==='tasks'){const d=await api('/admin/api/tasks');v.innerHTML=`<div class="card"><table><tr><th>Владелец</th><th>Артикул</th><th>Цена</th><th>Цель</th><th>Куплено</th><th></th></tr>${d.map(t=>`<tr><td>${t.owner}</td><td>${t.sku}</td><td>${t.current_sbp||'—'}</td><td>${t.target_price}</td><td>${t.bought}/${t.limit}</td><td><button class="danger" onclick="delTask('${t.owner}',${t.sku})">Удалить</button></td></tr>`).join('')}</table></div>`;}
+  if(t==='broadcast'){v.innerHTML=`<div class="card"><textarea id="btext" rows="4" placeholder="Текст сообщения всем пользователям"></textarea><div style="margin-top:8px"><button class="primary" onclick="broadcast()">Отправить</button></div><div class="muted" id="bres"></div></div>`;}
+}
+async function delUser(l){if(!confirm('Удалить '+l+'?'))return;await api('/admin/api/users/'+encodeURIComponent(l),{method:'DELETE'});toast('Удалено');render(current)}
+async function resetPw(l){const p=prompt('Новый пароль для '+l+':');if(!p)return;await api('/admin/api/users/'+encodeURIComponent(l)+'/reset_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});toast('Пароль изменён')}
+async function delTask(o,s){if(!confirm('Удалить задачу?'))return;await api('/admin/api/tasks/'+encodeURIComponent(o)+'/'+s,{method:'DELETE'});toast('Удалено');render(current)}
+async function broadcast(){const text=document.getElementById('btext').value;if(!text)return;const r=await api('/admin/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});document.getElementById('bres').textContent='Отправлено: '+r.sent+' / '+r.total}
+render('overview');
+</script></body></html>'''
+
+@app.route("/admin", methods=["GET"])
+def admin_page():
+    g = admin_guard()
+    if g:
+        return g
+    return Response(ADMIN_HTML, mimetype="text/html")
+
+
+@app.route("/admin/api/overview", methods=["GET"])
+def admin_overview():
+    g = admin_guard()
+    if g:
+        return g
+    users = load_json(USERS_FILE, {})
+    tasks = load_json(DATA_FILE, [])
+    contacts = load_json(CONTACTS_FILE, {}) or {}
+    meta = load_json(META_FILE, {}) or {}
+    return jsonify({"users": len(users), "tasks": len(tasks), "contacts": len(contacts),
+                    "last_check": int(meta.get("last_check") or 0), "require_token": REQUIRE_TOKEN})
+
+
+@app.route("/admin/api/users", methods=["GET"])
+def admin_users():
+    g = admin_guard()
+    if g:
+        return g
+    users = load_json(USERS_FILE, {})
+    contacts = load_json(CONTACTS_FILE, {}) or {}
+    out = []
+    for login, u in users.items():
+        tg = (u.get("tg_id") or "").strip()
+        if not tg:
+            for uname, c in contacts.items():
+                if uname == login:
+                    tg = c.get("id", "")
+        out.append({"login": login, "tg_id": tg, "has_token": bool(u.get("token"))})
+    return jsonify(out)
+
+
+@app.route("/admin/api/users/<login>", methods=["DELETE"])
+def admin_del_user(login):
+    g = admin_guard()
+    if g:
+        return g
+    with _lock:
+        users = load_json(USERS_FILE, {})
+        if login in users:
+            del users[login]
+            save_json(USERS_FILE, users)
+        tasks = [t for t in load_json(DATA_FILE, []) if (t.get("owner") or "default") != login]
+        save_json(DATA_FILE, tasks)
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/api/users/<login>/reset_password", methods=["POST"])
+def admin_reset_pw(login):
+    g = admin_guard()
+    if g:
+        return g
+    data = request.json or {}
+    new_pw = (data.get("password") or "").strip()
+    if len(new_pw) < 4:
+        return jsonify({"ok": False, "error": "Пароль от 4 символов"}), 400
+    with _lock:
+        users = load_json(USERS_FILE, {})
+        if login not in users:
+            return jsonify({"ok": False, "error": "Нет такого пользователя"}), 404
+        users[login]["password"] = hash_pw(new_pw)
+        save_json(USERS_FILE, users)
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/api/tasks", methods=["GET"])
+def admin_tasks():
+    g = admin_guard()
+    if g:
+        return g
+    return jsonify(load_json(DATA_FILE, []))
+
+
+@app.route("/admin/api/tasks/<owner>/<int:sku>", methods=["DELETE"])
+def admin_del_task(owner, sku):
+    g = admin_guard()
+    if g:
+        return g
+    with _lock:
+        tasks = [t for t in load_json(DATA_FILE, []) if not ((t.get("owner") or "default") == owner and int(t["sku"]) == sku)]
+        save_json(DATA_FILE, tasks)
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/api/contacts", methods=["GET"])
+def admin_contacts():
+    g = admin_guard()
+    if g:
+        return g
+    return jsonify(load_json(CONTACTS_FILE, {}) or {})
+
+
+@app.route("/admin/api/broadcast", methods=["POST"])
+def admin_broadcast():
+    g = admin_guard()
+    if g:
+        return g
+    data = request.json or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "Пустой текст"}), 400
+    contacts = load_json(CONTACTS_FILE, {}) or {}
+    sent = 0
+    total = 0
+    for uname, c in contacts.items():
+        cid = c.get("id")
+        if not cid:
+            continue
+        total += 1
+        r = send_tg(cid, text)
+        if r.get("ok"):
+            sent += 1
+    return jsonify({"ok": True, "sent": sent, "total": total})
 
 
 if __name__ == "__main__":
