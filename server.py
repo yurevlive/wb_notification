@@ -63,6 +63,7 @@ _load_dotenv()
 
 REQUIRE_TOKEN = os.environ.get("REQUIRE_TOKEN", "").lower() in ("1", "true", "yes")
 TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
+BOT_LINK = os.environ.get("BOT_LINK") or "@wb_jekich_bot"
 
 
 # ------------------------------------------------------------------ хранилище
@@ -104,6 +105,34 @@ def check_pw(stored, password):
             return False
     # старый формат: sha256 без соли
     return hmac.compare_digest(stored, hashlib.sha256(password.encode("utf-8")).hexdigest())
+
+
+def resolve_chat(raw):
+    """Возвращает (chat_id, key, error). key — стабильный ключ для кода."""
+    raw = (raw or "").strip()
+    if not raw:
+        return "", "", "Введите логин или ID Telegram"
+    key = raw[1:] if raw.startswith("@") else raw
+    chat = raw if raw.isdigit() else "@" + key
+    if not TG_TOKEN:
+        return "", key, "TG_TOKEN empty on server"
+    # @username ненадёжен (каналы, смена логина) — пробуем числовой id
+    try:
+        r = requests.get(tg_url("getChat"), params={"chat_id": chat}, timeout=10)
+        if r.status_code == 200:
+            payload = r.json()
+            if payload.get("ok"):
+                info = payload.get("result", {})
+                if info.get("type") in ("channel", "group", "supergroup"):
+                    return "", key, "Это канал или группа, а не личный аккаунт. Откройте %s в Telegram и нажмите Start." % BOT_LINK
+                cid = info.get("id")
+                if cid is not None:
+                    return str(cid), str(cid), None
+        elif r.status_code == 400:
+            sys.stderr.write("getChat failed: %s\n" % (r.text[:200],))
+    except Exception as e:
+        sys.stderr.write("getChat error: %r\n" % (e,))
+    return chat, key, None
 
 
 def send_tg(chat_id, text):
@@ -180,7 +209,7 @@ def normalize_task(item, previous=None):
 @app.route("/", methods=["GET"])
 @app.route("/health", methods=["GET"])
 def index():
-    return jsonify({"status": "ok", "service": "WB.Track API", "require_token": REQUIRE_TOKEN, "tg_token_set": bool(TG_TOKEN), "proxy_set": bool(os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("https_proxy") or os.environ.get("http_proxy"))})
+    return jsonify({"status": "ok", "service": "WB.Track API", "require_token": REQUIRE_TOKEN})
 
 
 @app.route("/get_ui", methods=["GET"])
@@ -262,47 +291,52 @@ def request_code():
     sys.stderr.write("request_code called: %r\\n" % (data,))
     sys.stderr.flush()
     raw = (data.get("tg_id") or "").strip()
-    if raw.startswith("@"):
-        chat, key = raw, raw[1:]
-    elif raw.isdigit():
-        chat, key = raw, raw
-    else:
-        chat, key = "@" + raw, raw
-    if not key:
-        return jsonify({"ok": False, "error": "Введите логин или ID Telegram"}), 400
+    chat, key, err = resolve_chat(raw)
+    if err:
+        return jsonify({"ok": False, "error": err, "sent": False}), 400
     code = "%06d" % random.randrange(1000000)
     now = int(time.time())
+    keys = [key] if chat == key or not chat.isdigit() else [key, chat]
     with _lock:
         codes = load_json(CODES_FILE, {})
-        codes[key] = {"code": code, "expires": now + CODE_TTL}
+        for k in keys:
+            codes[k] = {"code": code, "expires": now + CODE_TTL}
         save_json(CODES_FILE, codes)
     result = send_tg(chat, "Код входа в WB.Track: %s (действует 5 минут)" % code)
     if not result.get("ok"):
         sys.stderr.write("request_code send failed: %s\\n" % (result.get("error"),))
         sys.stderr.flush()
-    return jsonify({"ok": True, "sent": result.get("ok", False), "send_error": result.get("error")})
+        return jsonify({"ok": True, "sent": False, "send_error": result.get("error"),
+                        "error": "Telegram не принял сообщение. Откройте %s, нажмите Start и повторите." % BOT_LINK})
+    return jsonify({"ok": True, "sent": True})
 
 
 @app.route("/verify_code", methods=["POST"])
 def verify_code():
     data = request.json or {}
     raw = (data.get("tg_id") or "").strip()
-    if raw.startswith("@"):
-        key = raw[1:]
-    elif raw.isdigit():
-        key = raw
-    else:
-        key = raw
+    key = raw[1:] if raw.startswith("@") else raw
+    chat, ckey, _err = resolve_chat(raw) if TG_TOKEN else (raw, key, None)
+    keys = [ckey or key]
+    for extra in (key, chat):
+        if extra and extra not in keys:
+            keys.append(extra)
     code = (data.get("code") or "").strip()
     now = int(time.time())
     with _lock:
         codes = load_json(CODES_FILE, {})
-        entry = codes.get(key)
-        if not entry or entry.get("code") != code or int(entry.get("expires", 0)) < now:
+        entry = None
+        for k in keys:
+            e = codes.get(k)
+            if e and e.get("code") == code and int(e.get("expires", 0)) >= now:
+                entry = e
+                break
+        if entry is None:
             return jsonify({"ok": False, "error": "Неверный или просроченный код"}), 401
-        del codes[key]
+        for k in keys:
+            codes.pop(k, None)
         save_json(CODES_FILE, codes)
-    login = "tg_" + key
+    login = "tg_" + keys[0]
     with _lock:
         users = load_json(USERS_FILE, {})
         if login not in users:
