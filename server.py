@@ -871,11 +871,14 @@ def admin_users():
     contacts = load_json(CONTACTS_FILE, {}) or {}
     out = []
     for login, u in users.items():
-        tg = (u.get("tg_id") or "").strip()
-        if not tg:
-            for uname, c in contacts.items():
-                if uname == login:
-                    tg = c.get("id", "")
+        raw = (u.get("tg_id") or "").strip()
+        key = raw[1:] if raw.startswith("@") else raw
+        if key.isdigit():
+            tg = key
+        elif key.lower() in contacts:
+            tg = str(contacts[key.lower()].get("id", ""))
+        else:
+            tg = raw
         out.append({"login": login, "tg_id": tg, "has_token": bool(u.get("token"))})
     return jsonify(out)
 
@@ -950,12 +953,24 @@ def admin_broadcast():
     if not text:
         return jsonify({"ok": False, "error": "Пустой текст"}), 400
     contacts = load_json(CONTACTS_FILE, {}) or {}
-    sent = 0
-    total = 0
+    users = load_json(USERS_FILE, {})
+    targets = set()
     for uname, c in contacts.items():
         cid = c.get("id")
-        if not cid:
-            continue
+        if cid:
+            targets.add(str(cid))
+    for login, u in users.items():
+        raw = (u.get("tg_id") or "").strip()
+        key = raw[1:] if raw.startswith("@") else raw
+        if key.isdigit():
+            targets.add(key)
+        elif key.lower() in contacts:
+            cid = contacts[key.lower()].get("id")
+            if cid:
+                targets.add(str(cid))
+    sent = 0
+    total = 0
+    for cid in targets:
         total += 1
         r = send_tg(cid, text)
         if r.get("ok"):
