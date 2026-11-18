@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, send_from_directory
 
 app = Flask(__name__)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +34,7 @@ LOGINS_FILE = os.environ.get("LOGINS_FILE") or os.path.join(HERE, "logins.json")
 HISTORY_FILE = os.environ.get("HISTORY_FILE") or os.path.join(HERE, "history.json")
 META_FILE = os.environ.get("META_FILE") or os.path.join(HERE, "meta.json")
 WORKER_LOG_FILE = os.environ.get("WORKER_LOG_FILE") or os.path.join(HERE, "worker_log.json")
+BROADCAST_FILE = os.environ.get("BROADCASTS_FILE") or os.path.join(HERE, "broadcasts.json")
 CODE_TTL = 300
 S = "/"
 
@@ -425,7 +426,9 @@ def register():
         if login in users:
             return jsonify({"ok": False, "error": "Этот логин уже занят"}), 400
         token = new_token()
-        users[login] = {"password": hash_pw(password), "tg_id": tg_id, "token": token}
+        now = int(time.time())
+        users[login] = {"password": hash_pw(password), "tg_id": tg_id, "token": token,
+                        "created": now, "last_seen": now}
         save_json(USERS_FILE, users)
     return jsonify({"ok": True, "login": login, "tg_id": tg_id, "token": token})
 
@@ -442,13 +445,21 @@ def login():
 
     token = user.get("token") or new_token()
     upgrade = not user.get("password", "").startswith("pbkdf2$") or user.get("token") != token
-    if upgrade:
+    if upgrade or not user.get("created"):
         with _lock:
             users = load_json(USERS_FILE, {})
             users[login] = dict(users.get(login) or user)
             users[login]["password"] = hash_pw(password)  # миграция со старого sha256
             users[login]["token"] = token
+            users[login].setdefault("created", int(time.time()))
+            users[login]["last_seen"] = int(time.time())
             save_json(USERS_FILE, users)
+    else:
+        with _lock:
+            users = load_json(USERS_FILE, {})
+            if login in users:
+                users[login]["last_seen"] = int(time.time())
+                save_json(USERS_FILE, users)
     return jsonify({"ok": True, "login": login, "tg_id": user.get("tg_id", ""), "token": token})
 
 
@@ -530,12 +541,16 @@ def issue_token(tg_key, tg_id):
         users = load_json(USERS_FILE, {})
         user = users.get(login)
         if user is None:
-            user = {"password": hash_pw(secrets.token_hex(16)), "tg_id": tg_id, "token": new_token()}
+            now = int(time.time())
+            user = {"password": hash_pw(secrets.token_hex(16)), "tg_id": tg_id, "token": new_token(),
+                    "created": now, "last_seen": now}
             users[login] = user
         else:
             if not user.get("token"):
                 user["token"] = new_token()
             user["tg_id"] = tg_id
+            user.setdefault("created", int(time.time()))
+            user["last_seen"] = int(time.time())
         save_json(USERS_FILE, users)
     return user["token"], login
 
@@ -795,94 +810,24 @@ def admin_guard():
     return None
 
 
-ADMIN_HTML = r'''<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WB.Track — админка</title>
-<style>
-body{font-family:system-ui,sans-serif;margin:0;background:#0B0B12;color:#E0E0E0}
-header{background:linear-gradient(90deg,#7C3AED,#D946EF);padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
-header h1{margin:0;font-size:18px}
-main{padding:20px;max-width:1100px;margin:0 auto}
-.tabs{display:flex;gap:8px;margin-bottom:16px}
-.tabs button{background:#16161F;color:#E0E0E0;border:1px solid #2A2A38;padding:8px 14px;border-radius:8px;cursor:pointer}
-.tabs button.active{background:#D946EF;border-color:#D946EF;color:#fff}
-.card{background:#16161F;border:1px solid #2A2A38;border-radius:12px;padding:16px;margin-bottom:16px}
-table{width:100%;border-collapse:collapse}
-th,td{padding:8px 10px;border-bottom:1px solid #2A2A38;text-align:left;font-size:13px}
-th{color:#8A8A94;font-weight:600}
-button.danger{background:#EF4444;color:#fff;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:12px}
-button.primary{background:#D946EF;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer}
-input,textarea{background:#1E1E2A;color:#E0E0E0;border:1px solid #2A2A38;border-radius:8px;padding:8px;width:100%;box-sizing:border-box}
-.row{display:flex;gap:8px;align-items:center}
-.stat{display:inline-block;background:#1E1E2A;padding:10px 14px;border-radius:10px;margin:4px}
-.stat b{display:block;font-size:22px;color:#D946EF}
-.muted{color:#8A8A94;font-size:12px}
-#toast{position:fixed;bottom:20px;right:20px;background:#1B5E20;color:#fff;padding:10px 16px;border-radius:8px;display:none}
-</style></head><body>
-<header><h1>WB.Track — админка</h1><div class="row" style="gap:10px"><span id="who" class="muted"></span><button id="out" class="primary" style="display:none;padding:4px 10px" onclick="logoutAdmin()">Выйти</button></div></header>
-<main>
-<div class="tabs">
-<button class="tab active" data-t="overview">Обзор</button>
-<button class="tab" data-t="users">Пользователи</button>
-<button class="tab" data-t="tasks">Задачи</button>
-<button class="tab" data-t="broadcast">Рассылка</button>
-<button class="tab" data-t="calc">Калькулятор</button>
-<button class="tab" data-t="logs">Логи воркера</button>
-</div>
-<div id="view"></div>
-</main><div id="toast"></div>
-<script>
-const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let TOKEN = new URLSearchParams(location.search).get('token') || localStorage.getItem('admin_token') || '';
-if (location.search.indexOf('token=') >= 0) history.replaceState(null, '', location.pathname);
-const H = () => ({'X-Admin-Token': TOKEN || ''});
-function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
-function who(){const w=document.getElementById('who'),b=document.getElementById('out');if(TOKEN){w.textContent='токен активен';b.style.display=''}else{w.textContent='';b.style.display='none'}}
-function showLogin(msg){who();document.getElementById('view').innerHTML=`<div class="card" style="max-width:420px;margin:40px auto"><h3 style="margin:0 0 6px">Вход в админку</h3><div class="muted" style="margin-bottom:8px">Вставь ADMIN_TOKEN (задан в .env на сервере)</div><input id="tk" type="password" placeholder="ADMIN_TOKEN" autocomplete="off"><div style="margin-top:8px"><button class="primary" onclick="doLogin()">Войти</button></div><div id="lerr" style="color:#EF4444;margin-top:8px;font-size:12px">${esc(msg||'')}</div></div>`;const el=document.getElementById('tk');if(el)el.focus();}
-window.doLogin=async function(){const el=document.getElementById('tk');const t=(el?el.value:'').trim();if(!t)return;TOKEN=t;try{await api('/admin/api/overview');localStorage.setItem('admin_token',t);showTab('overview')}catch(e){TOKEN='';const er=document.getElementById('lerr');if(er)er.textContent='Токен не подошёл'}};
-window.logoutAdmin=function(){TOKEN='';localStorage.removeItem('admin_token');showLogin()};
-async function api(path, opts={}){const r=await fetch(path,{...opts,headers:{...H(),...(opts.headers||{})}});if(r.status===401){TOKEN='';localStorage.removeItem('admin_token');showLogin('Нужен токен заново');throw new Error(401)}if(!r.ok){toast('Ошибка '+r.status);throw new Error(r.status)}return r.json()}
-function showTab(t){if(!TOKEN){showLogin();return}document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.t===t));render(t)}
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.t)));
-let current='overview';
-async function render(t){current=t;who();if(!TOKEN){showLogin();return}const v=document.getElementById('view');v.innerHTML='Загрузка...';
-  if(t==='overview'){const d=await api('/admin/api/overview');const ts=await api('/admin/api/tasks');const byOwner={};ts.forEach(x=>{const o=x.owner||'default';byOwner[o]=(byOwner[o]||0)+1;});const max=Math.max(1,...Object.values(byOwner));const bars=Object.entries(byOwner).map(([o,c])=>`<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span style="width:120px;font-size:12px">${esc(o)}</span><div style="flex:1;background:#1E1E2A;border-radius:6px;height:18px"><div style="width:${Math.round(c/max*100)}%;background:#D946EF;height:18px;border-radius:6px"></div></div><b style="font-size:12px">${esc(c)}</b></div>`).join('');v.innerHTML=`<div class="card"><div class="stat"><b>${esc(d.users)}</b>пользователей</div><div class="stat"><b>${esc(d.tasks)}</b>задач</div><div class="stat"><b>${esc(d.contacts)}</b>контактов TG</div></div><div class="card"><h3 style="margin:0 0 8px">Задачи по владельцам</h3>${bars||'<div class="muted">Задач нет</div>'}</div><div class="card"><div class="muted">Последняя проверка: ${d.last_check?esc(new Date(d.last_check*1000).toLocaleString()):'—'}</div><div class="muted">REQUIRE_TOKEN: ${esc(d.require_token)}</div><div style="margin-top:8px"><button class="primary" onclick="runCheck()">Запустить проверку</button> <span class="muted" id="runres"></span></div></div>`;}
-  window.runCheck=async function(){const r=await api('/admin/api/run',{method:'POST'});if(r.url){window.open(r.url,'_blank');}const el=document.getElementById('runres');if(el)el.textContent=r.message||'';toast(r.ok?'Готово':'Ошибка');};
-  if(t==='users'){const d=await api('/admin/api/users');v.innerHTML=`<div class="card"><table><tr><th>Логин</th><th>TG id</th><th>Токен</th><th>Действия</th></tr>${d.map(u=>`<tr><td>${esc(u.login)}</td><td>${esc(u.tg_id||'—')}</td><td>${u.has_token?'да':'нет'}</td><td><button class="danger" data-l="${esc(u.login)}" onclick="delUser(this.dataset.l)">Удалить</button> <button data-l="${esc(u.login)}" onclick="resetPw(this.dataset.l)">Сбросить пароль</button></td></tr>`).join('')}</table></div>`;}
-  if(t==='tasks'){const d=await api('/admin/api/tasks');v.innerHTML=`<div class="card"><table><tr><th>Владелец</th><th>Артикул</th><th>Цена</th><th>Цель</th><th>Куплено</th><th></th></tr>${d.map(x=>`<tr><td>${esc(x.owner)}</td><td>${esc(x.sku)}</td><td>${esc(x.current_sbp||'—')}</td><td>${esc(x.target_price)}</td><td>${esc(x.bought)}/${esc(x.limit)}</td><td><button class="danger" data-o="${esc(x.owner)}" data-s="${esc(x.sku)}" onclick="delTask(this.dataset.o,+this.dataset.s)">Удалить</button></td></tr>`).join('')}</table></div>`;}
-  if(t==='broadcast'){v.innerHTML=`<div class="card"><textarea id="btext" rows="4" placeholder="Текст сообщения всем пользователям"></textarea><div style="margin-top:8px"><button class="primary" onclick="broadcast()">Отправить</button></div><div class="muted" id="bres"></div></div>`;}
-  if(t==='calc'){v.innerHTML=`<div class="card"><h3 style="margin:0 0 8px">Конвертер цен WB</h3><div class="muted" style="margin-bottom:8px">Введи любую из трёх цен — остальные посчитаются (коэффициенты 426/395 и 454/395)</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px"><div><label class="muted">База (price-history), ₽</label><input id="cb" type="number" oninput="conv2('b')" style="width:100%"></div><div><label class="muted">Кошелёк, ₽</label><input id="cw" type="number" oninput="conv2('w')" style="width:100%"></div><div><label class="muted">СБП, ₽</label><input id="cs" type="number" oninput="conv2('s')" style="width:100%"></div></div><div id="convres2" class="muted" style="margin-top:8px"></div></div><div class="card"><h3 style="margin:0 0 8px">Калькулятор</h3><div id="calcdisp" style="background:#1E1E2A;padding:12px;border-radius:8px;font-size:24px;text-align:right;margin-bottom:8px;min-height:36px">0</div><div id="calcgrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px"></div></div>`;
-    window.conv2=function(src){const b=document.getElementById('cb'),w=document.getElementById('cw'),s=document.getElementById('cs'),r=document.getElementById('convres2');
-      let base=null;
-      if(src==='b'){base=parseFloat(b.value);}
-      else if(src==='w'){base=parseFloat(w.value)*395/426;}
-      else if(src==='s'){base=parseFloat(s.value)*395/454;}
-      if(!base||base<=0){r.textContent='Введите число';return;}
-      const W=Math.round(base*426/395), S=Math.round(base*454/395);
-      if(src!=='b') b.value=Math.round(base);
-      if(src!=='w') w.value=W;
-      if(src!=='s') s.value=S;
-      r.innerHTML='База: <b>'+Math.round(base)+' ₽</b> &nbsp; Кошелёк: <b>'+W+' ₽</b> &nbsp; СБП: <b>'+S+' ₽</b>';
-    };
-    let cexpr='';const disp=document.getElementById('calcdisp');
-    function cupd(){disp.textContent=cexpr||'0';}
-    const btns=['7','8','9','/','4','5','6','*','1','2','3','-','0','.','=','+','C'];
-    const g=document.getElementById('calcgrid');
-    btns.forEach(b=>{const el=document.createElement('button');el.textContent=b;el.style.cssText='padding:12px;font-size:18px;border:none;border-radius:8px;background:#2A2A38;color:#E0E0E0;cursor:pointer';el.onclick=()=>{if(b==='C'){cexpr='';cupd();return;}if(b==='='){try{cexpr=String(eval(cexpr.replace(/[^0-9.+*/()-]/g,'')));}catch(e){cexpr='Ошибка';}cupd();return;}cexpr+=b;cupd();};g.appendChild(el);});
-  }
-  if(t==='logs'){const d=await api('/admin/api/worker_logs');v.innerHTML=`<div class="card"><table><tr><th>Время</th><th>Проверено</th><th>Алертов</th><th>Ошибок</th><th>Сообщение</th></tr>${d.slice().reverse().map(x=>`<tr><td>${esc(new Date(x.ts*1000).toLocaleString())}</td><td>${esc(x.checked)}</td><td>${esc(x.alerts)}</td><td>${esc(x.errors)}</td><td>${esc(x.message)}</td></tr>`).join('')}</table>${d.length?'':'<div class="muted">Логов пока нет</div>'}</div>`;}
-}
-async function delUser(l){if(!confirm('Удалить '+l+'?'))return;await api('/admin/api/users/'+encodeURIComponent(l),{method:'DELETE'});toast('Удалено');render(current)}
-async function resetPw(l){const p=prompt('Новый пароль для '+l+':');if(!p)return;await api('/admin/api/users/'+encodeURIComponent(l)+'/reset_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});toast('Пароль изменён, старая сессия сброшена')}
-async function delTask(o,s){if(!confirm('Удалить задачу?'))return;await api('/admin/api/tasks/'+encodeURIComponent(o)+'/'+s,{method:'DELETE'});toast('Удалено');render(current)}
-async function broadcast(){const text=document.getElementById('btext').value;if(!text)return;const r=await api('/admin/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});document.getElementById('bres').textContent='Отправлено: '+r.sent+' / '+r.total}
-if(TOKEN){render('overview')}else{showLogin()}
-</script></body></html>'''
+ADMIN_DIR = os.path.join(HERE, "admin")
+
+
+def admin_static(path):
+    return send_from_directory(ADMIN_DIR, path)
+
 
 @app.route("/admin", methods=["GET"])
 def admin_page():
-    """Страница отдаётся всегда: без токена покажет экран входа."""
-    return Response(ADMIN_HTML, mimetype="text/html")
+    """Отдаёт мини-SPA: без токена оно само покажет экран входа."""
+    return admin_static("admin.html")
+
+
+@app.route("/admin/ui/<path:filename>", methods=["GET"])
+def admin_ui(filename):
+    resp = admin_static(filename)
+    resp.headers["Cache-Control"] = "no-store" if filename.endswith(".js") else "public, max-age=3600"
+    return resp
 
 
 @app.route("/admin/api/overview", methods=["GET"])
@@ -898,6 +843,17 @@ def admin_overview():
                     "last_check": int(meta.get("last_check") or 0), "require_token": REQUIRE_TOKEN})
 
 
+def _chat_for(login, users, contacts):
+    """Числовой chat_id пользователя (через tg_id или @username в контактах)."""
+    user = users.get(login) or {}
+    raw = (user.get("tg_id") or "").strip()
+    key = raw[1:] if raw.startswith("@") else raw
+    if key.isdigit():
+        return key
+    info = contacts.get(key.lower()) or {}
+    return str(info.get("id") or "")
+
+
 @app.route("/admin/api/users", methods=["GET"])
 def admin_users():
     g = admin_guard()
@@ -905,18 +861,43 @@ def admin_users():
         return g
     users = load_json(USERS_FILE, {})
     contacts = load_json(CONTACTS_FILE, {}) or {}
+    tasks = load_json(DATA_FILE, [])
+    by_owner = {}
+    for t in tasks:
+        owner = t.get("owner") or "default"
+        by_owner[owner] = by_owner.get(owner, 0) + 1
     out = []
     for login, u in users.items():
-        raw = (u.get("tg_id") or "").strip()
-        key = raw[1:] if raw.startswith("@") else raw
-        if key.isdigit():
-            tg = key
-        elif key.lower() in contacts:
-            tg = str(contacts[key.lower()].get("id", ""))
-        else:
-            tg = raw
-        out.append({"login": login, "tg_id": tg, "has_token": bool(u.get("token"))})
+        key = (u.get("tg_id") or "").strip().lstrip("@")
+        out.append({
+            "login": login,
+            "tg_id": _chat_for(login, users, contacts) or key,
+            "tg_raw": (u.get("tg_id") or "").strip(),
+            "has_token": bool(u.get("token")),
+            "tasks": by_owner.get(login, 0),
+            "created": int(u.get("created") or 0),
+            "last_seen": int(u.get("last_seen") or 0),
+        })
     return jsonify(out)
+
+
+@app.route("/admin/api/user/<login>", methods=["GET"])
+def admin_user_detail(login):
+    g = admin_guard()
+    if g:
+        return g
+    users = load_json(USERS_FILE, {})
+    if login not in users:
+        return jsonify({"ok": False, "error": "Нет такого пользователя"}), 404
+    contacts = load_json(CONTACTS_FILE, {}) or {}
+    tasks = [t for t in load_json(DATA_FILE, []) if (t.get("owner") or "default") == login]
+    for t in tasks:
+        t["history"] = history_prices(login, t["sku"])
+    return jsonify({"ok": True, "login": login, "tg_id": _chat_for(login, users, contacts),
+                    "tg_raw": (users[login].get("tg_id") or "").strip(),
+                    "created": int(users[login].get("created") or 0),
+                    "last_seen": int(users[login].get("last_seen") or 0),
+                    "tasks": tasks})
 
 
 @app.route("/admin/api/users/<login>", methods=["DELETE"])
@@ -980,6 +961,100 @@ def admin_contacts():
     return jsonify(load_json(CONTACTS_FILE, {}) or {})
 
 
+@app.route("/admin/api/tasks/<owner>/<int:sku>", methods=["PATCH"])
+def admin_patch_task(owner, sku):
+    g = admin_guard()
+    if g:
+        return g
+    data = request.json or {}
+    with _lock:
+        tasks = load_json(DATA_FILE, [])
+        found = None
+        for t in tasks:
+            if (t.get("owner") or "default") == owner and int(t["sku"]) == sku:
+                found = t
+                break
+        if found is None:
+            return jsonify({"ok": False, "error": "Задача не найдена"}), 404
+        if "target_price" in data:
+            try:
+                price = int(data["target_price"])
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error": "Цена должна быть числом"}), 400
+            if price <= 0:
+                return jsonify({"ok": False, "error": "Цена должна быть больше 0"}), 400
+            found["target_price"] = price
+        if "limit" in data:
+            try:
+                limit = int(data["limit"])
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error": "Количество должно быть числом"}), 400
+            found["limit"] = max(1, limit)
+        if "bought" in data:
+            try:
+                found["bought"] = max(0, int(data["bought"]))
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error": "Куплено должно быть числом"}), 400
+        save_json(DATA_FILE, tasks)
+    return jsonify({"ok": True, "task": found})
+
+
+@app.route("/admin/api/message", methods=["POST"])
+def admin_message():
+    g = admin_guard()
+    if g:
+        return g
+    data = request.json or {}
+    login = (data.get("login") or "").strip()
+    text = (data.get("text") or "").strip()
+    if not login or not text:
+        return jsonify({"ok": False, "error": "Нужны логин и текст"}), 400
+    users = load_json(USERS_FILE, {})
+    contacts = load_json(CONTACTS_FILE, {}) or {}
+    if login.startswith("@"):
+        info = contacts.get(login[1:].lower()) or {}
+        chat = str(info.get("id") or "")
+    else:
+        chat = _chat_for(login, users, contacts)
+    if not chat:
+        return jsonify({"ok": False, "error": "У пользователя нет Telegram"}), 400
+    result = send_tg(chat, text)
+    if not result.get("ok"):
+        return jsonify({"ok": False, "error": result.get("error") or "Telegram не принял сообщение"}), 400
+    return jsonify({"ok": True, "chat": chat})
+
+
+@app.route("/admin/api/health", methods=["GET"])
+def admin_health():
+    g = admin_guard()
+    if g:
+        return g
+    meta = load_json(META_FILE, {}) or {}
+    logs = load_json(WORKER_LOG_FILE, []) or []
+    users = load_json(USERS_FILE, {})
+    tasks = load_json(DATA_FILE, [])
+    contacts = load_json(CONTACTS_FILE, {}) or {}
+    return jsonify({
+        "server_time": int(time.time()),
+        "last_check": int(meta.get("last_check") or 0),
+        "require_token": REQUIRE_TOKEN,
+        "worker_token_set": bool(WORKER_TOKEN),
+        "admin_token_set": bool(ADMIN_TOKEN),
+        "tg_token_set": bool(TG_TOKEN),
+        "users": len(users), "tasks": len(tasks), "contacts": len(contacts),
+        "worker_last": logs[-1] if logs else None,
+        "worker_runs": len(logs),
+    })
+
+
+@app.route("/admin/api/broadcasts", methods=["GET"])
+def admin_broadcasts():
+    g = admin_guard()
+    if g:
+        return g
+    return jsonify((load_json(BROADCAST_FILE, []) or [])[-30:])
+
+
 @app.route("/admin/api/broadcast", methods=["POST"])
 def admin_broadcast():
     g = admin_guard()
@@ -989,30 +1064,48 @@ def admin_broadcast():
     text = (data.get("text") or "").strip()
     if not text:
         return jsonify({"ok": False, "error": "Пустой текст"}), 400
+    audience = (data.get("audience") or "registered").strip()
     contacts = load_json(CONTACTS_FILE, {}) or {}
     users = load_json(USERS_FILE, {})
-    targets = set()
-    for uname, c in contacts.items():
-        cid = c.get("id")
-        if cid:
-            targets.add(str(cid))
-    for login, u in users.items():
-        raw = (u.get("tg_id") or "").strip()
-        key = raw[1:] if raw.startswith("@") else raw
-        if key.isdigit():
-            targets.add(key)
-        elif key.lower() in contacts:
-            cid = contacts[key.lower()].get("id")
-            if cid:
-                targets.add(str(cid))
+    targets = []
+    if audience == "logins":
+        logins = [str(x).strip() for x in (data.get("logins") or []) if str(x).strip()]
+        for login in logins:
+            chat = _chat_for(login, users, contacts)
+            if chat and chat not in targets:
+                targets.append(chat)
+    elif audience == "all":
+        for c in contacts.values():
+            cid = str((c or {}).get("id") or "")
+            if cid and cid not in targets:
+                targets.append(cid)
+        for login in users:
+            chat = _chat_for(login, users, contacts)
+            if chat and chat not in targets:
+                targets.append(chat)
+    else:
+        for login in users:
+            chat = _chat_for(login, users, contacts)
+            if chat and chat not in targets:
+                targets.append(chat)
     sent = 0
     total = 0
+    failed = 0
     for cid in targets:
         total += 1
         r = send_tg(cid, text)
         if r.get("ok"):
             sent += 1
-    return jsonify({"ok": True, "sent": sent, "total": total})
+        else:
+            failed += 1
+        time.sleep(0.05)
+    entry = {"ts": int(time.time()), "text": text[:1000], "audience": audience,
+             "sent": sent, "failed": failed, "total": total}
+    with _lock:
+        history = load_json(BROADCAST_FILE, []) or []
+        history.append(entry)
+        save_json(BROADCAST_FILE, history[-100:])
+    return jsonify({"ok": True, "sent": sent, "failed": failed, "total": total})
 
 
 @app.route("/worker/recipients", methods=["GET"])
