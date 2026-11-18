@@ -14,6 +14,7 @@ import hmac
 import json
 import os
 import random
+import re
 import requests
 import secrets
 import sys
@@ -42,6 +43,7 @@ UI_FILE = os.path.join(HERE, "app_ui.py")
 REQUIRE_TOKEN = os.environ.get("REQUIRE_TOKEN", "").lower() in ("1", "true", "yes")
 
 PBKDF2_ITERATIONS = 200_000
+LOGIN_RE = re.compile(r"^[a-z0-9_.-]{3,32}$")
 _lock = threading.Lock()
 
 
@@ -70,6 +72,8 @@ REQUIRE_TOKEN = os.environ.get("REQUIRE_TOKEN", "").lower() in ("1", "true", "ye
 TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
 BOT_LINK = os.environ.get("BOT_LINK") or "@wb_jekich_bot"
 TG_SECRET = os.environ.get("TG_WEBHOOK_SECRET", "").strip()
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
+WORKER_TOKEN = os.environ.get("WORKER_TOKEN", "").strip()
 
 
 # ------------------------------------------------------------------ хранилище
@@ -392,6 +396,8 @@ def normalize_task(item, previous=None):
 @app.route("/health", methods=["GET"])
 def index():
     return jsonify({"status": "ok", "service": "WB.Track API", "require_token": REQUIRE_TOKEN,
+                    "worker_token_set": bool(WORKER_TOKEN), "admin_token_set": bool(ADMIN_TOKEN),
+                    "tg_token_set": bool(TG_TOKEN),
                     "last_check": int((load_json(META_FILE, {}) or {}).get("last_check") or 0)})
 
 
@@ -412,6 +418,8 @@ def register():
     tg_id = (data.get("tg_id") or "").strip()
     if len(login) < 3 or len(password) < 4:
         return jsonify({"ok": False, "error": "Логин от 3 символов, пароль от 4"}), 400
+    if not LOGIN_RE.match(login):
+        return jsonify({"ok": False, "error": "Логин: латиница, цифры, _ . - (3-32 символа)"}), 400
     with _lock:
         users = load_json(USERS_FILE, {})
         if login in users:
@@ -464,8 +472,10 @@ def change_password():
         if login not in users:
             return jsonify({"ok": False, "error": "Пользователь не найден"}), 404
         users[login]["password"] = hash_pw(new_pw)
+        users[login]["token"] = new_token()
+        token = users[login]["token"]
         save_json(USERS_FILE, users)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "token": token})
 
 
 @app.route("/request_code", methods=["POST"])
@@ -499,8 +509,7 @@ def request_code():
 @app.route("/tg_contact", methods=["POST"])
 def tg_contact():
     """Воркер сообщает серверу: этот @username = этот telegram id."""
-    expected = os.environ.get("WORKER_TOKEN", "").strip()
-    if expected and not hmac.compare_digest(expected, request.headers.get("X-Worker-Token", "")):
+    if not worker_ok():
         return unauthorized()
     data = request.json or {}
     uname = (data.get("username") or "").strip().lower().lstrip("@")
@@ -631,8 +640,7 @@ def tg_webhook():
 @app.route("/tg_start", methods=["POST"])
 def tg_start():
     """Воркер увидел '/start <nonce>' — закрываем ожидающий вход."""
-    expected = os.environ.get("WORKER_TOKEN", "").strip()
-    if expected and not hmac.compare_digest(expected, request.headers.get("X-Worker-Token", "")):
+    if not worker_ok():
         return unauthorized()
     data = request.json or {}
     nonce = (data.get("nonce") or "").strip()
@@ -686,8 +694,7 @@ def verify_code():
 @app.route("/tasks", methods=["GET"])
 def get_tasks():
     if request.args.get("all") in ("1", "true"):
-        expected = os.environ.get("WORKER_TOKEN", "").strip()
-        if expected and not hmac.compare_digest(expected, request.headers.get("X-Worker-Token", "")):
+        if not worker_ok():
             return unauthorized()
         return jsonify(load_json(DATA_FILE, []))
     owner, _ = resolve_owner(request.args.get("user", "default"))
@@ -768,11 +775,15 @@ def check_now():
     return jsonify({"ok": True, "updated": updated})
 
 
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
+def worker_ok():
+    """Воркерские эндпоинты закрыты, если WORKER_TOKEN не задан (fail-closed)."""
+    if not WORKER_TOKEN:
+        return False
+    return hmac.compare_digest(WORKER_TOKEN, request.headers.get("X-Worker-Token", ""))
 
 
 def admin_ok():
-    got = request.headers.get("X-Admin-Token", "") or request.args.get("token", "")
+    got = request.headers.get("X-Admin-Token", "")
     if not ADMIN_TOKEN:
         return False
     return hmac.compare_digest(got, ADMIN_TOKEN)
@@ -808,7 +819,7 @@ input,textarea{background:#1E1E2A;color:#E0E0E0;border:1px solid #2A2A38;border-
 .muted{color:#8A8A94;font-size:12px}
 #toast{position:fixed;bottom:20px;right:20px;background:#1B5E20;color:#fff;padding:10px 16px;border-radius:8px;display:none}
 </style></head><body>
-<header><h1>WB.Track — админка</h1><div id="who" class="muted"></div></header>
+<header><h1>WB.Track — админка</h1><div class="row" style="gap:10px"><span id="who" class="muted"></span><button id="out" class="primary" style="display:none;padding:4px 10px" onclick="logoutAdmin()">Выйти</button></div></header>
 <main>
 <div class="tabs">
 <button class="tab active" data-t="overview">Обзор</button>
@@ -821,20 +832,24 @@ input,textarea{background:#1E1E2A;color:#E0E0E0;border:1px solid #2A2A38;border-
 <div id="view"></div>
 </main><div id="toast"></div>
 <script>
-const urlToken = new URLSearchParams(location.search).get('token');
-const TOKEN = urlToken || localStorage.getItem('admin_token') || prompt('ADMIN_TOKEN:');
-if (TOKEN) localStorage.setItem('admin_token', TOKEN);
-const H = {'X-Admin-Token': TOKEN||''};
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let TOKEN = new URLSearchParams(location.search).get('token') || localStorage.getItem('admin_token') || '';
+if (location.search.indexOf('token=') >= 0) history.replaceState(null, '', location.pathname);
+const H = () => ({'X-Admin-Token': TOKEN || ''});
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
-async function api(path, opts={}){const r=await fetch(path,{...opts,headers:{...H,...(opts.headers||{})}});if(r.status===401){localStorage.removeItem('admin_token');toast('Неверный токен (401)');const nt=prompt('ADMIN_TOKEN:');if(nt){localStorage.setItem('admin_token',nt);location.reload()}throw new Error(401)}if(!r.ok){toast('Ошибка '+r.status);throw new Error(r.status)}return r.json()}
-function showTab(t){document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.t===t));render(t)}
+function who(){const w=document.getElementById('who'),b=document.getElementById('out');if(TOKEN){w.textContent='токен активен';b.style.display=''}else{w.textContent='';b.style.display='none'}}
+function showLogin(msg){who();document.getElementById('view').innerHTML=`<div class="card" style="max-width:420px;margin:40px auto"><h3 style="margin:0 0 6px">Вход в админку</h3><div class="muted" style="margin-bottom:8px">Вставь ADMIN_TOKEN (задан в .env на сервере)</div><input id="tk" type="password" placeholder="ADMIN_TOKEN" autocomplete="off"><div style="margin-top:8px"><button class="primary" onclick="doLogin()">Войти</button></div><div id="lerr" style="color:#EF4444;margin-top:8px;font-size:12px">${esc(msg||'')}</div></div>`;const el=document.getElementById('tk');if(el)el.focus();}
+window.doLogin=async function(){const el=document.getElementById('tk');const t=(el?el.value:'').trim();if(!t)return;TOKEN=t;try{await api('/admin/api/overview');localStorage.setItem('admin_token',t);showTab('overview')}catch(e){TOKEN='';const er=document.getElementById('lerr');if(er)er.textContent='Токен не подошёл'}};
+window.logoutAdmin=function(){TOKEN='';localStorage.removeItem('admin_token');showLogin()};
+async function api(path, opts={}){const r=await fetch(path,{...opts,headers:{...H(),...(opts.headers||{})}});if(r.status===401){TOKEN='';localStorage.removeItem('admin_token');showLogin('Нужен токен заново');throw new Error(401)}if(!r.ok){toast('Ошибка '+r.status);throw new Error(r.status)}return r.json()}
+function showTab(t){if(!TOKEN){showLogin();return}document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.t===t));render(t)}
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.t)));
 let current='overview';
-async function render(t){current=t;const v=document.getElementById('view');v.innerHTML='Загрузка...';
-  if(t==='overview'){const d=await api('/admin/api/overview');const ts=await api('/admin/api/tasks');const byOwner={};ts.forEach(x=>{const o=x.owner||'default';byOwner[o]=(byOwner[o]||0)+1;});const max=Math.max(1,...Object.values(byOwner));const bars=Object.entries(byOwner).map(([o,c])=>`<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span style="width:120px;font-size:12px">${o}</span><div style="flex:1;background:#1E1E2A;border-radius:6px;height:18px"><div style="width:${Math.round(c/max*100)}%;background:#D946EF;height:18px;border-radius:6px"></div></div><b style="font-size:12px">${c}</b></div>`).join('');v.innerHTML=`<div class="card"><div class="stat"><b>${d.users}</b>пользователей</div><div class="stat"><b>${d.tasks}</b>задач</div><div class="stat"><b>${d.contacts}</b>контактов TG</div></div><div class="card"><h3 style="margin:0 0 8px">Задачи по владельцам</h3>${bars||'<div class="muted">Задач нет</div>'}</div><div class="card"><div class="muted">Последняя проверка: ${d.last_check?new Date(d.last_check*1000).toLocaleString():'—'}</div><div class="muted">REQUIRE_TOKEN: ${d.require_token}</div><div style="margin-top:8px"><button class="primary" onclick="runCheck()">Запустить проверку</button> <span class="muted" id="runres"></span></div></div>`;}
-  window.runCheck=async function(){const r=await api('/admin/api/run',{method:'POST'});if(r.url){window.open(r.url,'_blank');}document.getElementById('runres').textContent=r.message||'';toast(r.ok?'Готово':'Ошибка');};
-  if(t==='users'){const d=await api('/admin/api/users');v.innerHTML=`<div class="card"><table><tr><th>Логин</th><th>TG id</th><th>Токен</th><th>Действия</th></tr>${d.map(u=>`<tr><td>${u.login}</td><td>${u.tg_id||'—'}</td><td>${u.has_token?'да':'нет'}</td><td><button class="danger" onclick="delUser('${u.login}')">Удалить</button> <button onclick="resetPw('${u.login}')">Сбросить пароль</button></td></tr>`).join('')}</table></div>`;}
-  if(t==='tasks'){const d=await api('/admin/api/tasks');v.innerHTML=`<div class="card"><table><tr><th>Владелец</th><th>Артикул</th><th>Цена</th><th>Цель</th><th>Куплено</th><th></th></tr>${d.map(t=>`<tr><td>${t.owner}</td><td>${t.sku}</td><td>${t.current_sbp||'—'}</td><td>${t.target_price}</td><td>${t.bought}/${t.limit}</td><td><button class="danger" onclick="delTask('${t.owner}',${t.sku})">Удалить</button></td></tr>`).join('')}</table></div>`;}
+async function render(t){current=t;who();if(!TOKEN){showLogin();return}const v=document.getElementById('view');v.innerHTML='Загрузка...';
+  if(t==='overview'){const d=await api('/admin/api/overview');const ts=await api('/admin/api/tasks');const byOwner={};ts.forEach(x=>{const o=x.owner||'default';byOwner[o]=(byOwner[o]||0)+1;});const max=Math.max(1,...Object.values(byOwner));const bars=Object.entries(byOwner).map(([o,c])=>`<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span style="width:120px;font-size:12px">${esc(o)}</span><div style="flex:1;background:#1E1E2A;border-radius:6px;height:18px"><div style="width:${Math.round(c/max*100)}%;background:#D946EF;height:18px;border-radius:6px"></div></div><b style="font-size:12px">${esc(c)}</b></div>`).join('');v.innerHTML=`<div class="card"><div class="stat"><b>${esc(d.users)}</b>пользователей</div><div class="stat"><b>${esc(d.tasks)}</b>задач</div><div class="stat"><b>${esc(d.contacts)}</b>контактов TG</div></div><div class="card"><h3 style="margin:0 0 8px">Задачи по владельцам</h3>${bars||'<div class="muted">Задач нет</div>'}</div><div class="card"><div class="muted">Последняя проверка: ${d.last_check?esc(new Date(d.last_check*1000).toLocaleString()):'—'}</div><div class="muted">REQUIRE_TOKEN: ${esc(d.require_token)}</div><div style="margin-top:8px"><button class="primary" onclick="runCheck()">Запустить проверку</button> <span class="muted" id="runres"></span></div></div>`;}
+  window.runCheck=async function(){const r=await api('/admin/api/run',{method:'POST'});if(r.url){window.open(r.url,'_blank');}const el=document.getElementById('runres');if(el)el.textContent=r.message||'';toast(r.ok?'Готово':'Ошибка');};
+  if(t==='users'){const d=await api('/admin/api/users');v.innerHTML=`<div class="card"><table><tr><th>Логин</th><th>TG id</th><th>Токен</th><th>Действия</th></tr>${d.map(u=>`<tr><td>${esc(u.login)}</td><td>${esc(u.tg_id||'—')}</td><td>${u.has_token?'да':'нет'}</td><td><button class="danger" data-l="${esc(u.login)}" onclick="delUser(this.dataset.l)">Удалить</button> <button data-l="${esc(u.login)}" onclick="resetPw(this.dataset.l)">Сбросить пароль</button></td></tr>`).join('')}</table></div>`;}
+  if(t==='tasks'){const d=await api('/admin/api/tasks');v.innerHTML=`<div class="card"><table><tr><th>Владелец</th><th>Артикул</th><th>Цена</th><th>Цель</th><th>Куплено</th><th></th></tr>${d.map(x=>`<tr><td>${esc(x.owner)}</td><td>${esc(x.sku)}</td><td>${esc(x.current_sbp||'—')}</td><td>${esc(x.target_price)}</td><td>${esc(x.bought)}/${esc(x.limit)}</td><td><button class="danger" data-o="${esc(x.owner)}" data-s="${esc(x.sku)}" onclick="delTask(this.dataset.o,+this.dataset.s)">Удалить</button></td></tr>`).join('')}</table></div>`;}
   if(t==='broadcast'){v.innerHTML=`<div class="card"><textarea id="btext" rows="4" placeholder="Текст сообщения всем пользователям"></textarea><div style="margin-top:8px"><button class="primary" onclick="broadcast()">Отправить</button></div><div class="muted" id="bres"></div></div>`;}
   if(t==='calc'){v.innerHTML=`<div class="card"><h3 style="margin:0 0 8px">Конвертер цен WB</h3><div class="muted" style="margin-bottom:8px">Введи любую из трёх цен — остальные посчитаются (коэффициенты 426/395 и 454/395)</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px"><div><label class="muted">База (price-history), ₽</label><input id="cb" type="number" oninput="conv2('b')" style="width:100%"></div><div><label class="muted">Кошелёк, ₽</label><input id="cw" type="number" oninput="conv2('w')" style="width:100%"></div><div><label class="muted">СБП, ₽</label><input id="cs" type="number" oninput="conv2('s')" style="width:100%"></div></div><div id="convres2" class="muted" style="margin-top:8px"></div></div><div class="card"><h3 style="margin:0 0 8px">Калькулятор</h3><div id="calcdisp" style="background:#1E1E2A;padding:12px;border-radius:8px;font-size:24px;text-align:right;margin-bottom:8px;min-height:36px">0</div><div id="calcgrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px"></div></div>`;
     window.conv2=function(src){const b=document.getElementById('cb'),w=document.getElementById('cw'),s=document.getElementById('cs'),r=document.getElementById('convres2');
@@ -849,27 +864,24 @@ async function render(t){current=t;const v=document.getElementById('view');v.inn
       if(src!=='s') s.value=S;
       r.innerHTML='База: <b>'+Math.round(base)+' ₽</b> &nbsp; Кошелёк: <b>'+W+' ₽</b> &nbsp; СБП: <b>'+S+' ₽</b>';
     };
-    // simple calculator
     let cexpr='';const disp=document.getElementById('calcdisp');
     function cupd(){disp.textContent=cexpr||'0';}
     const btns=['7','8','9','/','4','5','6','*','1','2','3','-','0','.','=','+','C'];
     const g=document.getElementById('calcgrid');
     btns.forEach(b=>{const el=document.createElement('button');el.textContent=b;el.style.cssText='padding:12px;font-size:18px;border:none;border-radius:8px;background:#2A2A38;color:#E0E0E0;cursor:pointer';el.onclick=()=>{if(b==='C'){cexpr='';cupd();return;}if(b==='='){try{cexpr=String(eval(cexpr.replace(/[^0-9.+*/()-]/g,'')));}catch(e){cexpr='Ошибка';}cupd();return;}cexpr+=b;cupd();};g.appendChild(el);});
   }
-  if(t==='logs'){const d=await api('/admin/api/worker_logs');v.innerHTML=`<div class="card"><table><tr><th>Время</th><th>Проверено</th><th>Алертов</th><th>Ошибок</th><th>Сообщение</th></tr>${d.slice().reverse().map(x=>`<tr><td>${new Date(x.ts*1000).toLocaleString()}</td><td>${x.checked}</td><td>${x.alerts}</td><td>${x.errors}</td><td>${x.message}</td></tr>`).join('')}</table>${d.length?'':'<div class="muted">Логов пока нет</div>'}</div>`;}
+  if(t==='logs'){const d=await api('/admin/api/worker_logs');v.innerHTML=`<div class="card"><table><tr><th>Время</th><th>Проверено</th><th>Алертов</th><th>Ошибок</th><th>Сообщение</th></tr>${d.slice().reverse().map(x=>`<tr><td>${esc(new Date(x.ts*1000).toLocaleString())}</td><td>${esc(x.checked)}</td><td>${esc(x.alerts)}</td><td>${esc(x.errors)}</td><td>${esc(x.message)}</td></tr>`).join('')}</table>${d.length?'':'<div class="muted">Логов пока нет</div>'}</div>`;}
 }
 async function delUser(l){if(!confirm('Удалить '+l+'?'))return;await api('/admin/api/users/'+encodeURIComponent(l),{method:'DELETE'});toast('Удалено');render(current)}
-async function resetPw(l){const p=prompt('Новый пароль для '+l+':');if(!p)return;await api('/admin/api/users/'+encodeURIComponent(l)+'/reset_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});toast('Пароль изменён')}
+async function resetPw(l){const p=prompt('Новый пароль для '+l+':');if(!p)return;await api('/admin/api/users/'+encodeURIComponent(l)+'/reset_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});toast('Пароль изменён, старая сессия сброшена')}
 async function delTask(o,s){if(!confirm('Удалить задачу?'))return;await api('/admin/api/tasks/'+encodeURIComponent(o)+'/'+s,{method:'DELETE'});toast('Удалено');render(current)}
 async function broadcast(){const text=document.getElementById('btext').value;if(!text)return;const r=await api('/admin/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});document.getElementById('bres').textContent='Отправлено: '+r.sent+' / '+r.total}
-render('overview');
+if(TOKEN){render('overview')}else{showLogin()}
 </script></body></html>'''
 
 @app.route("/admin", methods=["GET"])
 def admin_page():
-    g = admin_guard()
-    if g:
-        return g
+    """Страница отдаётся всегда: без токена покажет экран входа."""
     return Response(ADMIN_HTML, mimetype="text/html")
 
 
@@ -936,6 +948,7 @@ def admin_reset_pw(login):
         if login not in users:
             return jsonify({"ok": False, "error": "Нет такого пользователя"}), 404
         users[login]["password"] = hash_pw(new_pw)
+        users[login]["token"] = new_token()
         save_json(USERS_FILE, users)
     return jsonify({"ok": True})
 
@@ -1002,11 +1015,20 @@ def admin_broadcast():
     return jsonify({"ok": True, "sent": sent, "total": total})
 
 
+@app.route("/worker/recipients", methods=["GET"])
+def worker_recipients():
+    """Воркеру: кто на кого подписан (логин -> tg_id), без паролей и токенов."""
+    if not worker_ok():
+        return unauthorized()
+    users = load_json(USERS_FILE, {})
+    contacts = load_json(CONTACTS_FILE, {}) or {}
+    out = {login: {"tg_id": u.get("tg_id") or ""} for login, u in users.items()}
+    return jsonify({"users": out, "contacts": contacts})
+
+
 @app.route("/worker_log", methods=["POST"])
 def worker_log():
-    g = None
-    expected = os.environ.get("WORKER_TOKEN", "").strip()
-    if expected and not hmac.compare_digest(expected, request.headers.get("X-Worker-Token", "")):
+    if not worker_ok():
         return unauthorized()
     data = request.json or {}
     with _lock:

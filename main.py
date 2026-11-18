@@ -97,15 +97,15 @@ def parse_clipboard(text):
     if not t:
         return None, None, None
     sku = None
-    m = _re.search(r"wildberries\\.ru/catalog/(\\d+)", t)
+    m = _re.search(r"wildberries\.ru/catalog/(\d+)", t)
     if m:
         sku = int(m.group(1))
     if sku is None:
-        m = _re.search(r"ozon\\.ru/product/[^/]*?(\\d{6,})", t)
+        m = _re.search(r"ozon\.ru/product/[^/]*?(\d{6,})", t)
         if m:
             sku = int(m.group(1))
     if sku is None:
-        nums = [int(x) for x in _re.findall(r"\\d{6,}", t)]
+        nums = [int(x) for x in _re.findall(r"\d{6,}", t)]
         if nums:
             sku = nums[0]
     if sku is None:
@@ -728,6 +728,12 @@ def main(page: ft.Page):
                     err.value = data.get("error", "Ошибка")
                     page.update()
                     return
+                if data.get("token"):
+                    st["token"] = data["token"]
+                    try:
+                        page.client_storage.set("wb_token", data["token"])
+                    except Exception:
+                        pass
                 dlg2.open = False
                 page.update()
                 snack = ft.SnackBar(content=ft.Text("Пароль изменён", color="white"), bgcolor="#1B5E20")

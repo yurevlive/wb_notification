@@ -58,7 +58,7 @@ except (AttributeError, ValueError):
 # ---------------------------------------------------------------- состояние
 
 def load_state():
-    state = {"offset": 0, "bought": {}, "alerted": {}}
+    state = {"offset": 0, "bought": {}, "alerted": {}, "notified": {}}
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -220,6 +220,56 @@ def api_delete_task(sku, owner=""):
         return False
 
 
+def api_recipients():
+    """login/@username -> chat_id, чтобы слать алерты владельцу задачи."""
+    if DRY_RUN:
+        return {}
+    headers = {}
+    token = os.environ.get("WORKER_TOKEN", "").strip()
+    if token:
+        headers["X-Worker-Token"] = token
+    try:
+        r = requests.get(API_BASE + "/worker/recipients", headers=headers, timeout=20)
+        if r.status_code != 200:
+            log("GET /worker/recipients: HTTP %s — алерты уйдут в TG_CHAT_ID" % r.status_code)
+            return {}
+        data = r.json()
+        return data if isinstance(data, dict) else {}
+    except (requests.RequestException, ValueError) as e:
+        log("GET /worker/recipients: %s" % e)
+        return {}
+
+
+def build_chat_map(rec):
+    """Собирает login/логин Telegram -> числовой chat_id."""
+    chat_map = {}
+    for uname, info in (rec.get("contacts") or {}).items():
+        cid = str((info or {}).get("id") or "").strip()
+        if cid:
+            key = uname.lstrip("@").lower()
+            chat_map[key] = cid
+            chat_map["@" + key] = cid
+    for login, user in (rec.get("users") or {}).items():
+        raw = str((user or {}).get("tg_id") or "").strip()
+        key = raw.lstrip("@").lower()
+        cid = key if key.isdigit() else (chat_map.get(key) or chat_map.get("@" + key))
+        if cid:
+            chat_map[login] = cid
+    return chat_map
+
+
+def chat_for_owner(owner, chat_map):
+    owner = (owner or "").strip()
+    if owner in chat_map:
+        return chat_map[owner]
+    if owner.startswith("tg_"):
+        key = owner[3:].lower()
+        if key.isdigit():
+            return key
+        return chat_map.get(key) or chat_map.get("@" + key) or ""
+    return chat_map.get(owner.lower()) or ""
+
+
 # ------------------------------------------------------------------- команды
 
 def handle_command(chat_id, text, state):
@@ -239,7 +289,8 @@ def handle_command(chat_id, text, state):
         lines = ["📋 Текущие задачи:\n"]
         for t in tasks:
             sku = int(t["sku"])
-            bought = max(int(t.get("bought") or 0), int(state["bought"].get(str(sku), 0)))
+            entry = notified_entry(state, task_key(t.get("owner"), sku), sku)
+            bought = max(int(t.get("bought") or 0), int(entry.get("n") or 0))
             mark = "✅" if bought >= int(t.get("limit") or 1) else "⏳"
             cur = "%s ₽" % t["current_sbp"] if t.get("current_sbp") else "—"
             lines.append(
@@ -260,7 +311,7 @@ def handle_command(chat_id, text, state):
         if sku is None:
             send_tg(chat_id, "⚠️ Формат: /del АРТИКУЛ")
             return
-        ok = api_delete_task(sku)
+        ok = api_delete_task(sku, "telegram")
         send_tg(chat_id, "🗑 Артикул %d удалён." % sku if ok else "⚠️ Артикул %d не найден." % sku)
         return
 
@@ -296,7 +347,8 @@ def handle_command(chat_id, text, state):
 
 # ------------------------------------------------------------------ мониторинг
 
-def check_prices(state):
+def check_prices(state, chat_map=None):
+    chat_map = chat_map or {}
     tasks = api_tasks()
     if not tasks:
         log("Задач нет — проверять нечего")
@@ -315,7 +367,9 @@ def check_prices(state):
             continue
 
         limit = int(t.get("limit") or 1)
-        bought = max(int(t.get("bought") or 0), int(state["bought"].get(str(sku), 0)))
+        key = task_key(t.get("owner"), sku)
+        entry = notified_entry(state, key, sku)
+        bought = max(int(t.get("bought") or 0), int(entry.get("n") or 0))
         name, wallet, sbp, image = None, None, None, None
         for attempt in range(3):
             try:
@@ -349,14 +403,23 @@ def check_prices(state):
         if bought >= limit:
             continue
         if sbp > target:
-            if state["alerted"].get(str(sku)) is not None:
-                state["alerted"].pop(str(sku), None)
+            if entry.get("p") is not None:
+                entry["p"] = None
+                state["notified"][key] = entry
                 changed = True
             continue
-        if state["alerted"].get(str(sku)) == sbp:
+        if entry.get("p") == sbp:
             continue
 
-        sent = send_tg(TG_CHAT_ID or t.get("owner") or "", (
+        owner = (t.get("owner") or "").strip()
+        chat = chat_for_owner(owner, chat_map)
+        if not chat and owner in ("", "default", "telegram"):
+            chat = TG_CHAT_ID
+        if not chat:
+            log("[%d] нет Telegram-чата для владельца %r — алерт пропущен" % (sku, owner))
+            continue
+
+        sent = send_tg(chat, (
             "🔔 Цена WB дошла до цели!\n"
             "%s (Арт: %d)\n"
             "💳 СБП: %s ₽ | 👛 Кошелёк: %s ₽\n"
@@ -366,18 +429,41 @@ def check_prices(state):
         if not sent:
             continue
         alerts += 1
-        state["bought"][str(sku)] = bought + 1
-        state["alerted"][str(sku)] = sbp
+        entry["p"] = sbp
+        entry["n"] = bought + 1
+        state["notified"][key] = entry
         changed = True
         time.sleep(1)
 
     return changed, checked, alerts, errors
 
 
+def task_key(owner, sku):
+    """Ключ состояния: у разных владельцев один артикул не должен слипаться."""
+    return "%s|%s" % ((owner or "default").strip().lower(), int(sku))
+
+
+def notified_entry(state, key, sku):
+    """{"p": последняя цена алерта, "n": сколько раз уведомили} с переносом старого формата."""
+    entries = state.get("notified")
+    if not isinstance(entries, dict):
+        entries = {}
+        state["notified"] = entries
+    entry = entries.get(key)
+    if isinstance(entry, dict):
+        return entry
+    old_price = (state.get("alerted") or {}).get(str(sku))
+    if old_price is not None:
+        old_n = int((state.get("bought") or {}).get(str(sku), 0) or 0)
+        return {"p": old_price, "n": max(old_n, 1)}
+    return {"p": None, "n": 0}
+
+
 def run_cycle():
     state = load_state()
     changed = poll_telegram(state)
-    res = check_prices(state)
+    chat_map = build_chat_map(api_recipients())
+    res = check_prices(state, chat_map)
     if isinstance(res, tuple):
         c_changed, checked, alerts, errors = res
     else:
