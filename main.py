@@ -6,7 +6,7 @@ import requests
 
 S = chr(47)
 API = os.environ.get("WB_API") or "".join(["ht", "tps:", S, S, "yurevlive.", "pythonanywhere.", "com"])
-WB = "".join(["ht", "tps:", S, S, "www.", "wildberries.", S, "ru", S, "catalog", S])
+WB = "".join(["ht", "tps:", S, S, "www.", "wildberries.","ru", S, "catalog", S])
 NET_TIMEOUT = 8
 
 APP_VERSION = "1.0.11"
